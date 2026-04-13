@@ -1,0 +1,124 @@
+{
+  "best_epoch": 250,
+  "class_weight_positive": 3.2272727272730855,
+  "dataset_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_seed_context_success_dataset.jsonl",
+  "epochs_completed": 250,
+  "epochs_requested": 250,
+  "feature_spec": {
+    "base_feature_dim": 38,
+    "family_ids": [
+      "block_to_tray_proxy",
+      "container_insertion_proxy",
+      "drawer_open_proxy",
+      "relocate_to_region_proxy",
+      "two_object_stack_proxy"
+    ],
+    "feature_dim": 44,
+    "include_policy_query_index": true,
+    "policy_query_index_scale": 79.0
+  },
+  "history_tail": [
+    {
+      "epoch": 241.0,
+      "learning_rate": 0.004481430935116237,
+      "train_accuracy": 0.8128136200716689,
+      "train_log_loss": 0.4795702341686033,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5645027407630966
+    },
+    {
+      "epoch": 242.0,
+      "learning_rate": 0.004436616625765074,
+      "train_accuracy": 0.8128136200716708,
+      "train_log_loss": 0.4794906748287786,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5644429358353629
+    },
+    {
+      "epoch": 243.0,
+      "learning_rate": 0.004392250459507424,
+      "train_accuracy": 0.8128136200716689,
+      "train_log_loss": 0.4794119816689364,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5643837617465929
+    },
+    {
+      "epoch": 244.0,
+      "learning_rate": 0.00434832795491235,
+      "train_accuracy": 0.8129480286738189,
+      "train_log_loss": 0.47933414451515827,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5643252115063302
+    },
+    {
+      "epoch": 245.0,
+      "learning_rate": 0.004304844675363226,
+      "train_accuracy": 0.812948028673821,
+      "train_log_loss": 0.47925715332883256,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5642672782085434
+    },
+    {
+      "epoch": 246.0,
+      "learning_rate": 0.004261796228609594,
+      "train_accuracy": 0.8129480286738199,
+      "train_log_loss": 0.47918099820450116,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5642099550304808
+    },
+    {
+      "epoch": 247.0,
+      "learning_rate": 0.004219178266323498,
+      "train_accuracy": 0.8129480286738204,
+      "train_log_loss": 0.4791056693677666,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5641532352315002
+    },
+    {
+      "epoch": 248.0,
+      "learning_rate": 0.004176986483660263,
+      "train_accuracy": 0.8129480286738208,
+      "train_log_loss": 0.47903115717325023,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5640971121519606
+    },
+    {
+      "epoch": 249.0,
+      "learning_rate": 0.00413521661882366,
+      "train_accuracy": 0.8132168458781205,
+      "train_log_loss": 0.47895745210255636,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5640415792121015
+    },
+    {
+      "epoch": 250.0,
+      "learning_rate": 0.004093864452635423,
+      "train_accuracy": 0.8132168458781206,
+      "train_log_loss": 0.47888454476230924,
+      "val_accuracy": 0.7665123456790123,
+      "val_log_loss": 0.5639866299109585
+    }
+  ],
+  "l2": 0.001,
+  "label_key": "context_success_label",
+  "learning_rate_decay": 0.99,
+  "learning_rate_initial": 0.05,
+  "output_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_logreg_v1.json",
+  "summary_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_logreg_v1.summary.json",
+  "train_examples": 6578,
+  "train_metrics": {
+    "accuracy": 0.8132168458781206,
+    "brier": 0.15178795907493497,
+    "count": 6578.0,
+    "positive_rate": 0.23655913978492202,
+    "weighted_log_loss": 0.47888454476230924
+  },
+  "val_examples": 1878,
+  "val_metrics": {
+    "accuracy": 0.7665123456790123,
+    "brier": 0.1867093094135351,
+    "count": 1878.0,
+    "positive_rate": 0.2222222222222297,
+    "weighted_log_loss": 0.5639866299109585
+  }
+}

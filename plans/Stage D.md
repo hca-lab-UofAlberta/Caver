@@ -1,0 +1,338 @@
+# Stage D: CAVER Core Implementation on the Simulation Harness
+
+## Goal
+
+Implement the selective-verification layer itself on top of the Stage-C LIBERO harness.
+
+## Components to implement
+
+- `pi0.5` candidate-generation wrapper
+- deterministic execution adapter for the simulation action space
+- normalized action encoding and candidate-diversity resampling
+- provider interface
+  - primary path: GE-Sim
+  - contingency path: local lightweight provider only if GE-Sim stalls
+- frozen context embedding and future embedding extraction
+- three-head proxy utility head
+- exact feature vector construction:
+  - proxy value
+  - future embedding
+  - action features
+  - disagreement
+  - novelty
+  - pre-calibration uncertainty
+- frozen-form selector with:
+  - exact propensities
+  - exploration floor
+  - safety-mask renormalization
+- lagged DR pseudo-outcomes
+- per-round calibrator refit
+- admit / abstain / reject routing into the unchanged `pi-StepNFT` backend
+
+## Shared-backend rule
+
+This stage must preserve the proposal's central attribution logic:
+
+- CAVER and the real-only baseline share the same candidate wrapper.
+- CAVER and the real-only baseline share the same `pi-StepNFT` backend.
+- The mainline difference is only which executed examples are selected, corrected, and admitted.
+
+## First implementation milestone
+
+One end-to-end round on one LIBERO task with:
+
+- candidate generation
+- safe-set filtering
+- exact propensity logging
+- one executed outcome
+- DR tuple creation
+- calibrator refit
+- optional backend update if enough positives exist
+
+## Deliverables
+
+- CAVER method modules wired into the LIBERO harness
+- config files for selector, calibrator, and backend
+- baseline switches for:
+  - full CAVER
+  - real-only uniform selector
+  - selection-only
+  - admission-only
+  - random verification
+  - value-only
+  - no-DR
+- integration tests for one-round execution
+
+## Exit criteria
+
+- A single-task run can complete at least one full round without manual intervention.
+- Logged propensities, outcomes, and admitted-buffer decisions are internally consistent.
+- Real-only and CAVER differ only in the intended decision-layer components.
+
+## Current progress snapshot
+
+- The Stage-C warm-start artifact is now ready for backend bring-up:
+  - authoritative demo manifest: `/projects/p57098/euijin1/Caver/runs/stage0__seed-demo-convert__libero-stage0-seed__seed7__budget0__20260402T203345Z/results/stage0_seed_warm_start_demo.manifest.json`
+  - replay items are structurally compatible with RLinf SAC ingest and use `action=(35,)`, which matches the existing `5 x 7` OpenPI-LIBERO action expectation
+- The SDRE train runtime is now consolidated around the repaired `openpi` venv:
+  - `hydra-core` upgraded to `1.3.2` to fix Python `3.11` dataclass import failures
+  - `ray 2.49.1+computecanada`, `accelerate`, and `tensorboard` are installed in `third_party/venvs/openpi`
+  - the combined train-side import path is now valid for `openpi`, `rlinf`, `libero`, and `examples.embodiment.train_embodied_agent`
+- New Stage-D scaffolding now exists:
+  - train runtime wrapper: `scripts/env/with_openpi_pistepnft_libero_train.sh`
+  - OpenPI overlay repair helper: `scripts/openpi/install_transformers_replace.sh`
+  - OpenPI checkpoint conversion wrapper: `scripts/openpi/convert_openpi_checkpoint_to_pytorch.sh`
+  - Slurm submitter for checkpoint conversion: `scripts/slurm/submit_openpi_checkpoint_conversion.sh`
+  - first warm-start SAC smoke launcher: `scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh`
+  - Slurm submitter for the first warm-start SAC smoke: `scripts/slurm/submit_stage0_seed_warm_start_smoke.sh`
+- The next hard blocker is the checkpoint format expected by RLinf:
+  - cached source checkpoint: `/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero`
+  - current source format: JAX Orbax checkpoint only
+  - required target for RLinf OpenPI loading: `model.safetensors` under a PyTorch-format directory
+- The first conversion attempt exposed one missing SDRE runtime repair:
+  - Slurm job `5393` failed on `2026-04-02 22:11:53` America/Edmonton with `ValueError: transformers_replace is not installed correctly`
+  - root cause: the `openpi` venv had `transformers==4.53.2`, but the upstream `transformers_replace` overlay had never been copied into site-packages
+  - fix: `scripts/openpi/install_transformers_replace.sh` now repairs that overlay automatically, and both Stage-D wrappers call it before model construction
+- The corrected job chain is now live:
+  - conversion job `5395` completed successfully on `2026-04-02 22:20:02` America/Edmonton
+  - conversion run dir: `/projects/p57098/euijin1/Caver/runs/staged__openpi-pytorch-convert__pi05_libero__seed0__budget0__20260403T041843Z`
+  - output checkpoint now exists under `/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch/` with `model.safetensors` and `config.json`
+  - early smoke retries `5396` through `5399` were all short Hydra config-shape fixes, not backend runtime crashes
+  - resolved smoke issues in order:
+    - `5396`: upstream config alias `model/pi05` does not exist
+    - `5397`: SAC/data-only fields needed additive `+...=` overrides under Hydra struct mode
+    - `5398`: `actor.model.openpi.use_nft_loss` also needed additive override
+    - `5399`: `actor.model.openpi.solver_type` already existed and had to revert to a normal override
+  - the first runtime-visible smoke `5400` did not fail fast; it ran until the full `02:00:00` walltime and was cancelled by Slurm at `2026-04-03 00:24:32` America/Edmonton
+  - the only flushed runtime signal from `5400` was `Started a local Ray instance`, so the next bottleneck was startup opacity rather than another immediate config error
+  - fix for the next debug iteration:
+    - switched the smoke manifest default to the existing 10-item artifact at `/projects/p57098/euijin1/Caver/logs/runtime/stage0_seed_warm_start_demo_smoke.manifest.json`
+    - forced unbuffered Python execution
+    - reduced smoke defaults to `1` train env, `1` eval env, `5` rollout steps, `global_batch_size=2`, `micro_batch_size=1`
+    - disabled OpenPI PyTorch compile for the smoke path via `+actor.model.openpi.pytorch_compile_mode=null`
+    - reduced rollout loops to `algorithm.rollout_epoch=1` and `algorithm.eval_rollout_epoch=0`
+  - the smaller replacement smoke `5401` still timed out on `2026-04-03 04:07:33` America/Edmonton after the full `02:00:00` walltime
+  - `5401` never created `results/rlinf_logs`; its run directory only contains `job.sbatch` and `manifest.json`
+  - `5401` still flushed only the same local Ray startup line, so the stall is now treated as happening before `EmbodiedRunner(...)` logger creation and possibly even before the first config dump in `train_embodied_agent.py`
+  - the new observability patch is now in place:
+    - `scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh` exports `CAVER_STAGE_DEBUG=1`
+    - stage markers were added to `examples/embodiment/train_embodied_agent.py`
+    - stage markers were added to `rlinf.config.validate_cfg(...)` and `validate_embodied_cfg(...)`
+    - stage markers were added to `rlinf.scheduler.cluster.Cluster`
+    - stage markers were added to `rlinf.data.replay_buffer.SACReplayBuffer.create_from_demo(...)`
+  - debug probe `5402` run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T124647Z`
+  - debug probe `5402` final state: `TIMEOUT` on `2026-04-03 07:17:03` America/Edmonton after `00:30:15`
+  - live `5402` stderr now shows the first useful stage sequence:
+    - `train_embodied_agent: entered hydra main`
+    - `train_embodied_agent: calling validate_cfg`
+    - `rlinf.config: validate_embodied_cfg constructing Cluster for placement validation`
+    - `rlinf.cluster: ray.init(address='auto') failed, starting local Ray`
+    - Ray then prints `Started a local Ray instance`
+  - no later stage marker has appeared after that Ray line, so the current narrowest blocker is local `ray.init(...)` itself before it returns to RLinf cluster setup
+  - pure-Ray isolation probe chain:
+    - `5403`: failed on `2026-04-03 12:05:27` America/Edmonton due to a probe quoting bug (`NameError: name 'seconds' is not defined`)
+    - `5404`: authoritative pure-Ray probe, run dir `/projects/p57098/euijin1/Caver/runs/staged__ray-init-probe__no-dashboard__seed1__budget0__20260403T180549Z`
+    - `5404` start time: `2026-04-03 12:05:49` America/Edmonton
+    - `5404` walltime cap: `00:15:00`
+    - `5404` ETA upper bound from Slurm walltime: `2026-04-03 12:20:49` America/Edmonton
+    - `5404` uses `include_dashboard=False` and `RAY_USAGE_STATS_ENABLED=0`
+    - final `5404` state: `TIMEOUT` on `2026-04-03 12:21:04` America/Edmonton after `00:15:15`
+    - final `5404` stdout still showed only `[ray-probe] before ray.init() ...`
+    - final `5404` stderr still showed only `Started a local Ray instance.`
+  - the next probe layer instrumented Ray internals directly:
+    - new probe script: `scripts/debug/ray_init_probe.py`
+    - new probe wrapper: `scripts/debug/run_ray_connect_probe.sh`
+    - `5405`: failed immediately on `2026-04-03 12:33:24` America/Edmonton with `OSError: validate_socket_filename failed: AF_UNIX path length cannot exceed 107 bytes`
+    - root cause for `5405`: `RAY_TMPDIR` was rooted too deep under the per-run path, so Ray's socket path exceeded the Linux AF_UNIX limit
+    - fix: `scripts/common.sh` now exposes `caver_default_ray_tmpdir()`, and the train/probe wrappers default `RAY_TMPDIR` to `/projects/p57098/euijin1/ray/\${SLURM_JOB_ID:-manual}`
+    - `5406`: failed immediately on `2026-04-03 12:34:34` America/Edmonton because the new probe wrapper lacked execute permissions
+    - fix for `5406`: `scripts/debug/run_ray_connect_probe.sh` is now executable
+    - `5407`: still failed on `2026-04-03 12:35:08` America/Edmonton with the same AF_UNIX path-length error while using the older, still-too-long temp root under `/projects/p57098/euijin1/Caver/raytmp/...`
+    - `5408`: first successful deep probe into the real startup path, run dir `/projects/p57098/euijin1/Caver/runs/staged__ray-connect-probe__instrumented-shorttmp__seed2__budget0__20260403T183607Z`
+    - `5408` reached `CoreWorker: start` but never reached `CoreWorker: done`
+    - live Ray session logs under `/projects/p57098/euijin1/ray/5408/ray/session_latest/logs/` showed the raylet eagerly spawning `64` workers, far above the Slurm `--cpus-per-task=8` allocation
+    - that made the next working hypothesis explicit: local `ray.init(...)` was inheriting full-node CPU visibility instead of the Slurm task allocation
+    - `5409`: CPU-limited pure-Ray probe, run dir `/projects/p57098/euijin1/Caver/runs/staged__ray-connect-probe__cpulimited__seed0__budget0__20260403T183710Z`
+    - `5409` final state: `COMPLETED` on `2026-04-03 12:37:29` America/Edmonton after `00:00:19`
+    - `5409` passed the old failure point and printed `CoreWorker: done`, `worker.connect: done`, `after ray.init`, and `after ray.shutdown`
+    - authoritative fix direction from `5409`: local Ray on SDRE must be started with the Slurm CPU/GPU allocation, not unconstrained node-wide defaults
+  - the RLinf cluster fallback now matches the successful probe:
+    - `rlinf/scheduler/cluster/cluster.py` now parses Slurm CPU counts plus visible GPU counts and passes them into local `ray.init(...)`
+    - local Ray also keeps `include_dashboard=False` in that fallback path
+  - smoke retry `5410` is now live with that fix applied:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184143Z`
+    - node: `l40s-01`
+    - start time: `2026-04-03 12:41:43` America/Edmonton
+    - Slurm cap: `00:45:00`
+    - ETA upper bound from Slurm walltime: `2026-04-03 13:26:43` America/Edmonton
+    - log files:
+      - stdout: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184143Z-5410.out`
+      - stderr: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184143Z-5410.err`
+  - `5410` resolved the original startup blocker but exposed a new, downstream config assertion:
+    - final state: `FAILED` on `2026-04-03 12:42:05` America/Edmonton after `00:00:22`
+    - authoritative result: RLinf cluster bring-up completed, Ray managers launched, and the run advanced past the old local `ray.init(...)` stall
+    - new failure: `AssertionError: env.train.max_steps_per_rollout_epoch must be divisible by actor.model.num_action_chunks`
+    - root cause: the extra-minimal debug override used `--rollout-steps 1`, but `libero_goal_ppo_openpi_pi05` sets `actor.model.num_action_chunks: 5`
+    - fix: `scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh` now validates `--rollout-steps` against the selected config before submitting GPU work
+  - corrected smoke retry `5411` is now live:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184435Z`
+    - node: `l40s-01`
+    - start time: `2026-04-03 12:44:36` America/Edmonton
+    - Slurm cap: `00:45:00`
+    - ETA upper bound from Slurm walltime: `2026-04-03 13:29:36` America/Edmonton
+    - log files:
+      - stdout: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184435Z-5411.out`
+      - stderr: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184435Z-5411.err`
+  - `5411` advanced deeper but exposed another packaging bug in the public `pi-StepNFT` checkout:
+    - final state: `FAILED` on `2026-04-03 12:44:59` America/Edmonton after `00:00:23`
+    - `5411` got through config validation, RLinf cluster bring-up, placement validation, actor/rollout/env group launch, and full resolved-config dump
+    - new failure: `ModuleNotFoundError: No module named 'rlinf.data.datasets.math'`
+    - root cause: `rlinf/data/datasets/__init__.py` imported `MathDataset` unconditionally even though `math.py` is absent in this checkout; that broke `robot_demo` ingest before replay loading
+    - fix: the math dataset import is now optional, and only `data.type == "math"` raises if that module is absent
+    - local validation in the train environment now succeeds:
+      - `create_rl_dataset(cfg.data.type='robot_demo', path=stage0_seed_warm_start_demo_smoke.manifest.json)` returns `SACReplayBuffer`
+      - the smoke demo manifest loads with `10` items
+  - corrected smoke retry `5412` is now live:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184644Z`
+    - node: `l40s-01`
+    - start time: `2026-04-03 12:46:44` America/Edmonton
+    - Slurm cap: `00:45:00`
+    - ETA upper bound from Slurm walltime: `2026-04-03 13:31:44` America/Edmonton
+    - log files:
+      - stdout: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184644Z-5412.out`
+      - stderr: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184644Z-5412.err`
+  - `5412` advanced through demo-buffer load and exposed the next actor-side checkpoint issue:
+    - final state: `FAILED` on `2026-04-03 12:48:10` America/Edmonton after `00:01:26`
+    - `5412` got through config validation, cluster bring-up, actor/rollout/env launch, replay-buffer load, `EmbodiedRunner` construction, and into `runner.init_workers()`
+    - authoritative worker failure from stdout: `EmbodiedSACFSDPPolicy.init_worker()` raised `FileNotFoundError` for `/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch/physical-intelligence/libero/norm_stats.json`
+    - root cause: the PyTorch checkpoint conversion copied only `model.safetensors` and `config.json`; it did not copy the source checkpoint `assets/` tree, and RLinf's OpenPI loader also looked for norm stats at the checkpoint root instead of under `checkpoint_dir/assets`
+    - fixes:
+      - `scripts/openpi/convert_openpi_checkpoint_to_pytorch.sh` now copies `assets/` into the PyTorch checkpoint directory after conversion
+      - `rlinf/models/embodiment/openpi/__init__.py` now loads norm stats from `checkpoint_dir/assets` with a root-level fallback for compatibility
+      - the current converted checkpoint has already been repaired in place with `assets/physical-intelligence/libero/norm_stats.json`
+      - local validation under the train wrapper now confirms `openpi.training.checkpoints.load_norm_stats(.../pi05_libero_pytorch/assets, 'physical-intelligence/libero')` succeeds
+    - cleanup path hardening was added too:
+      - `rlinf.scheduler.cluster.Cluster.signal_handler` now treats `list_actors(...)` as best-effort so local Ray runs without the dashboard do not hide the real worker failure behind a secondary `ServerUnavailable` exception
+  - corrected smoke retry `5413` is now live:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185123Z`
+    - node: `l40s-01`
+    - start time: `2026-04-03 12:51:23` America/Edmonton
+    - Slurm cap: `00:45:00`
+    - ETA upper bound from Slurm walltime: `2026-04-03 13:36:23` America/Edmonton
+    - log files:
+      - stdout: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185123Z-5413.out`
+      - stderr: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185123Z-5413.err`
+  - `5413` got through actor model setup but exposed one more SAC/OpenPI integration mismatch:
+    - final state: `FAILED` on `2026-04-03 12:53:33` America/Edmonton after `00:02:10`
+    - `5413` got through replay-buffer load, `EmbodiedRunner` construction, norm-stat loading, and actor model initialization
+    - authoritative worker failure from stdout: `EmbodiedSACFSDPPolicy.init_worker()` raised `AssertionError` at `fsdp_sac_policy_worker.py:265` because `params_critic` was empty
+    - root cause: SAC optimizer construction only treated parameter names containing `q_head` as critic-side, but the OpenPI RL model exposes critic parameters under `value_head`
+    - fix: `rlinf/workers/actor/fsdp_sac_policy_worker.py` now treats both `q_head` and `value_head` as critic parameters for optimizer split and target-model update
+  - corrected smoke retry `5414` is now live:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185558Z`
+    - node: `l40s-01`
+    - start time: `2026-04-03 12:55:58` America/Edmonton
+    - Slurm cap: `00:45:00`
+    - ETA upper bound from Slurm walltime: `2026-04-03 13:40:58` America/Edmonton
+    - log files:
+      - stdout: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185558Z-5414.out`
+      - stderr: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185558Z-5414.err`
+  - `5414` got through actor and rollout worker setup and exposed the next env-side import bug:
+    - final state: `FAILED` on `2026-04-03 12:59:03` America/Edmonton after `00:03:05`
+    - `5414` got through replay-buffer load, actor optimizer build, rollout model norm-stat loading, and deep enough into env startup to import robosuite / OpenGL helpers
+    - authoritative env-worker failure: `ModuleNotFoundError: No module named 'tensorflow'` from `rlinf/envs/utils.py`
+    - root cause: `rlinf/envs/utils.py` imported TensorFlow at module import time even though LIBERO only uses the generic tensor/image helpers; only `crop_and_resize` and `center_crop_image` actually require TensorFlow
+    - fix: `rlinf/envs/utils.py` now makes TensorFlow optional and raises only if the TensorFlow-specific crop helpers are called without it
+    - local validation under the train wrapper now confirms `from rlinf.envs.utils import to_tensor, tile_images` works without TensorFlow
+  - corrected smoke retry `5415` is now live:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T190019Z`
+    - node: `l40s-01`
+    - start time: `2026-04-03 13:00:19` America/Edmonton
+    - Slurm cap: `00:45:00`
+    - ETA upper bound from Slurm walltime: `2026-04-03 13:45:19` America/Edmonton
+    - log files:
+      - stdout: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T190019Z-5415.out`
+      - stderr: `/projects/p57098/euijin1/Caver/logs/slurm/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T190019Z-5415.err`
+  - `5415` got through env import and exposed the next LIBERO compatibility issue:
+    - final state: `FAILED` on `2026-04-03 13:03:21` America/Edmonton after `00:03:02`
+    - `5415` got through replay-buffer load, actor initialization, rollout initialization, and into `EnvWorker.init_worker()`
+    - authoritative env-worker failure from stdout: `_pickle.UnpicklingError` at `LIBERO/libero/benchmark/__init__.py:get_task_init_states()` because PyTorch 2.6+ now defaults `torch.load(..., weights_only=True)`
+    - root cause: LIBERO task init-state assets are trusted local benchmark files that contain pickled numpy objects, which PyTorch 2.6+ rejects unless `weights_only=False` is passed explicitly
+    - fixes:
+      - `third_party/src/LIBERO/libero/libero/benchmark/__init__.py` now loads init states with `torch.load(..., weights_only=False)`
+      - sibling init-state load sites in `third_party/src/LIBERO/libero/lifelong/metric.py` and `third_party/src/LIBERO/libero/lifelong/evaluate.py` are patched the same way
+      - `third_party/src/LIBERO/libero/lifelong/utils.py` now loads trusted local checkpoints with `weights_only=False`
+      - local validation under the train wrapper now confirms `benchmark.get_benchmark('libero_goal')(0).get_task_init_states(0)` returns an `ndarray` with shape `(50, 79)`
+  - smoke retry `5416` confirmed the next barrier is not SAC ingest anymore but embedded LIBERO itself:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T190505Z`
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 13:07:31` America/Edmonton after `00:02:24`
+    - `5416` got through replay ingest, actor initialization, rollout initialization, and patched LIBERO init-state loading
+    - authoritative env-worker failure: the Python `3.11` train-side LIBERO runtime crashed while constructing the offscreen renderer
+  - renderer follow-up `5417` confirmed the old split-bridge fallback still applies:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T191117Z`
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 13:13:39` America/Edmonton after `00:02:22`
+    - `5417` forced `MUJOCO_GL=osmesa` inside the Python `3.11` train stack
+    - authoritative env-worker failure: segmentation fault during `OffScreenRenderEnv(...)`
+  - renderer follow-up `5418` closed the embedded-renderer branch cleanly:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T191425Z`
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 13:16:38` America/Edmonton after `00:02:13`
+    - `5418` forced `MUJOCO_GL=egl` inside the same train stack
+    - authoritative env-worker failure: EGL device/display initialization failed
+  - working conclusion after `5416` through `5418`:
+    - embedded LIBERO inside the Python `3.11` RLinf training interpreter is not the SDRE execution path to push further right now
+    - the correct SDRE online execution model remains the split bridge: OpenPI and training on `env-caver-train`, LIBERO rollout in its own compatibility runtime
+  - Stage-D smoke bring-up then pivoted to the actual minimum backend objective: offline replay-buffer ingest plus one SAC update from the Stage-0 demo artifact
+    - `examples/embodiment/train_embodied_agent.py` now supports `runner.offline_demo_only=true`
+    - `rlinf/runners/embodied_runner.py` now supports a demo-only run path that skips rollout/env/eval groups entirely
+    - `rlinf/workers/actor/fsdp_sac_policy_worker.py` now allows SAC training directly from the demo buffer when `algorithm.allow_demo_only_training=true`
+    - `scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh` now defaults to that demo-only mode and exposes `--online-rollout` when we intentionally want the old path
+  - smoke `5419` validated the new control path and exposed the first model-side gap:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T192440Z`
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 13:26:48` America/Edmonton after `00:02:08`
+    - authoritative result: demo manifest ingest succeeded and the run skipped rollout/env exactly as intended
+    - new failure: `openpi_action_model.forward()` raised `NotImplementedError` for `ForwardType.SAC` / `ForwardType.SAC_Q`
+  - smoke `5420` fixed that interface gap but exposed the next critic-path bug:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T193043Z`
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 13:32:54` America/Edmonton after `00:02:11`
+    - fix applied before `5420`: `rlinf/models/embodiment/openpi/openpi_action_model.py` now implements `sac_forward(...)` and `sac_q_forward(...)` for the OpenPI RL model
+    - new failure: `critic_loss.backward()` had no grad because the pi05 config used `value_after_vlm=true`, which routed critic prediction through a constant zero path for SAC-Q
+  - smoke `5421` fixed the action-conditioned critic path but exposed a head-shape mismatch:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T193344Z`
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 13:35:53` America/Edmonton after `00:02:09`
+    - fix applied before `5421`: OpenPI SAC-Q now forces suffix-conditioned value prediction instead of the VLM-prefix-only path
+    - new failure: suffix critic features are `1024`-dimensional, but the existing pi05 `value_head` expected the `2048`-dimensional VLM feature size
+  - smoke `5422` is the authoritative Stage-D fix confirmation:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T193632Z`
+    - node: `l40s-01`
+    - final state: `COMPLETED` on `2026-04-03 13:39:10` America/Edmonton after `00:02:37`
+    - fix applied before `5422`: OpenPI now has a dedicated suffix critic head for `value_after_vlm=true` configs, and SAC-Q uses that head for action-conditioned values
+    - authoritative completion evidence:
+      - `train_embodied_agent: runner.init_workers completed`
+      - `train_embodied_agent: runner.run completed`
+      - progress bar finished `1/1`
+      - reported metrics include `train/sac/critic_loss=0.000339`, `train/sac/actor_loss=0.0122`, `train/sac/alpha=0.01`, `train/critic/grad_norm=1.43`, and `train/actor/grad_norm=13.1`
+    - artifact path: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T193632Z/results/rlinf_logs/replay_buffer_0.pkl`
+  - current Stage-D state after `5422`:
+    - the first warm-start replay-buffer ingest and one-step SAC training job now completes end to end on SDRE
+    - that fix is specifically for the demo-only backend bring-up path
+    - embedded online LIBERO inside the Python `3.11` training runtime is still not the path to use; keep online execution on the split bridge
+- One local validation caveat remains:
+  - a direct `PI0Pytorch(pi05_libero)` constructor probe was killed on the login node, which is consistent with login-node memory pressure and is not currently treated as a new batch-mode blocker
+
+## Immediate next step
+
+- Treat `5422` as the Stage-D backend floor: replay ingest plus one SAC update is now working.
+- Keep online LIBERO execution on the existing split-bridge path instead of the embedded Python `3.11` training runtime.
+- Build the actual CAVER decision-layer integration on top of that split online path and the now-working demo-ingest backend, rather than spending more time on embedded renderer bring-up.
+
+## Risks and watchpoints
+
+- GE-Sim integration can become the pacing item for this stage.
+- The calibrator and DR logic must use lagged information only; no same-round leakage.
+- Novelty must depend only on executed-history features, not future information from the same context.

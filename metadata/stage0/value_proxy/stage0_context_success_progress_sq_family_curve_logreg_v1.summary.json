@@ -1,0 +1,130 @@
+{
+  "best_epoch": 250,
+  "class_weight_positive": 8.0,
+  "dataset_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_seed_context_success_dataset.jsonl",
+  "epochs_completed": 250,
+  "epochs_requested": 250,
+  "feature_spec": {
+    "base_feature_dim": 38,
+    "family_ids": [
+      "block_to_tray_proxy",
+      "container_insertion_proxy",
+      "drawer_open_proxy",
+      "relocate_to_region_proxy",
+      "two_object_stack_proxy"
+    ],
+    "feature_dim": 55,
+    "include_family_one_hot": true,
+    "include_family_progress_interaction": true,
+    "include_family_progress_sq_interaction": true,
+    "include_policy_query_index": true,
+    "include_policy_query_index_sq": true,
+    "policy_query_index_scale": 79.0
+  },
+  "history_tail": [
+    {
+      "epoch": 241.0,
+      "learning_rate": 0.004481430935116237,
+      "train_accuracy": 0.9017565557039424,
+      "train_log_loss": 0.43929330248853743,
+      "val_accuracy": 0.8259515141922535,
+      "val_log_loss": 0.4946694126984155
+    },
+    {
+      "epoch": 242.0,
+      "learning_rate": 0.004436616625765074,
+      "train_accuracy": 0.9017565557039429,
+      "train_log_loss": 0.4391737369422744,
+      "val_accuracy": 0.8259515141922535,
+      "val_log_loss": 0.4945626440703753
+    },
+    {
+      "epoch": 243.0,
+      "learning_rate": 0.004392250459507424,
+      "train_accuracy": 0.9017565557039426,
+      "train_log_loss": 0.4390554930909821,
+      "val_accuracy": 0.8259515141922535,
+      "val_log_loss": 0.49445704784788275
+    },
+    {
+      "epoch": 244.0,
+      "learning_rate": 0.00434832795491235,
+      "train_accuracy": 0.9017565557039421,
+      "train_log_loss": 0.43893855502853724,
+      "val_accuracy": 0.8259515141922535,
+      "val_log_loss": 0.494352610083865
+    },
+    {
+      "epoch": 245.0,
+      "learning_rate": 0.004304844675363226,
+      "train_accuracy": 0.9017565557039419,
+      "train_log_loss": 0.4388229070670666,
+      "val_accuracy": 0.8259515141922535,
+      "val_log_loss": 0.4942493170192858
+    },
+    {
+      "epoch": 246.0,
+      "learning_rate": 0.004261796228609594,
+      "train_accuracy": 0.9017565557039416,
+      "train_log_loss": 0.43870853373342145,
+      "val_accuracy": 0.8273232563047364,
+      "val_log_loss": 0.49414715508016716
+    },
+    {
+      "epoch": 247.0,
+      "learning_rate": 0.004219178266323498,
+      "train_accuracy": 0.9017565557039415,
+      "train_log_loss": 0.43859541976571004,
+      "val_accuracy": 0.8273232563047364,
+      "val_log_loss": 0.4940461108746668
+    },
+    {
+      "epoch": 248.0,
+      "learning_rate": 0.004176986483660263,
+      "train_accuracy": 0.9017565557039448,
+      "train_log_loss": 0.43848355010986545,
+      "val_accuracy": 0.8273232563047364,
+      "val_log_loss": 0.4939461711901984
+    },
+    {
+      "epoch": 249.0,
+      "learning_rate": 0.00413521661882366,
+      "train_accuracy": 0.9017565557039414,
+      "train_log_loss": 0.4383729099163282,
+      "val_accuracy": 0.8273232563047364,
+      "val_log_loss": 0.49384732299061224
+    },
+    {
+      "epoch": 250.0,
+      "learning_rate": 0.004093864452635423,
+      "train_accuracy": 0.9017565557039426,
+      "train_log_loss": 0.4382634845367636,
+      "val_accuracy": 0.8273232563047364,
+      "val_log_loss": 0.49374955341343363
+    }
+  ],
+  "l2": 0.001,
+  "label_key": "context_success_label",
+  "learning_rate_decay": 0.99,
+  "learning_rate_initial": 0.05,
+  "output_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_family_curve_logreg_v1.json",
+  "raw_positive_class_weight": 11.175436993441776,
+  "summary_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_family_curve_logreg_v1.summary.json",
+  "target_mode": "context_success_progress_sq_v1",
+  "train_examples": 6578,
+  "train_metrics": {
+    "accuracy": 0.9017565557039426,
+    "brier": 0.09943677455797939,
+    "count": 6578.0,
+    "positive_rate": 0.08213257565528538,
+    "weighted_log_loss": 0.4382634845367636
+  },
+  "val_examples": 1878,
+  "val_metrics": {
+    "accuracy": 0.8273232563047364,
+    "brier": 0.1267711684237659,
+    "count": 1878.0,
+    "positive_rate": 0.07779905406512014,
+    "weighted_log_loss": 0.49374955341343363
+  }
+}

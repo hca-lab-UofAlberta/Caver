@@ -1,0 +1,126 @@
+{
+  "best_epoch": 250,
+  "class_weight_positive": 8.0,
+  "dataset_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_seed_context_success_dataset.jsonl",
+  "epochs_completed": 250,
+  "epochs_requested": 250,
+  "feature_spec": {
+    "base_feature_dim": 38,
+    "family_ids": [
+      "block_to_tray_proxy",
+      "container_insertion_proxy",
+      "drawer_open_proxy",
+      "relocate_to_region_proxy",
+      "two_object_stack_proxy"
+    ],
+    "feature_dim": 44,
+    "include_policy_query_index": true,
+    "policy_query_index_scale": 79.0
+  },
+  "history_tail": [
+    {
+      "epoch": 241.0,
+      "learning_rate": 0.004481430935116237,
+      "train_accuracy": 0.9037934783648072,
+      "train_log_loss": 0.4446352458751072,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4808117793519326
+    },
+    {
+      "epoch": 242.0,
+      "learning_rate": 0.004436616625765074,
+      "train_accuracy": 0.9037934783648068,
+      "train_log_loss": 0.4445142938196096,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4807005689410299
+    },
+    {
+      "epoch": 243.0,
+      "learning_rate": 0.004392250459507424,
+      "train_accuracy": 0.9037934783648068,
+      "train_log_loss": 0.44439467859723,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4805905838257466
+    },
+    {
+      "epoch": 244.0,
+      "learning_rate": 0.00434832795491235,
+      "train_accuracy": 0.9037934783648056,
+      "train_log_loss": 0.4442763841330276,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4804818093590235
+    },
+    {
+      "epoch": 245.0,
+      "learning_rate": 0.004304844675363226,
+      "train_accuracy": 0.9037934783648057,
+      "train_log_loss": 0.44415939457210457,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4803742310923211
+    },
+    {
+      "epoch": 246.0,
+      "learning_rate": 0.004261796228609594,
+      "train_accuracy": 0.9037934783648058,
+      "train_log_loss": 0.44404369427602897,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4802678347724403
+    },
+    {
+      "epoch": 247.0,
+      "learning_rate": 0.004219178266323498,
+      "train_accuracy": 0.9037934783648057,
+      "train_log_loss": 0.4439292678193625,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4801626063384387
+    },
+    {
+      "epoch": 248.0,
+      "learning_rate": 0.004176986483660263,
+      "train_accuracy": 0.9041429407304006,
+      "train_log_loss": 0.44381609998624344,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.4800585319185856
+    },
+    {
+      "epoch": 249.0,
+      "learning_rate": 0.00413521661882366,
+      "train_accuracy": 0.904277349332548,
+      "train_log_loss": 0.44370417576702476,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.47995559782736846
+    },
+    {
+      "epoch": 250.0,
+      "learning_rate": 0.004093864452635423,
+      "train_accuracy": 0.9042773493325487,
+      "train_log_loss": 0.44359348035499613,
+      "val_accuracy": 0.8574947240687973,
+      "val_log_loss": 0.47985379056257804
+    }
+  ],
+  "l2": 0.001,
+  "label_key": "context_success_label",
+  "learning_rate_decay": 0.99,
+  "learning_rate_initial": 0.05,
+  "output_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_logreg_v1.json",
+  "raw_positive_class_weight": 11.175436993441776,
+  "summary_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_logreg_v1.summary.json",
+  "target_mode": "context_success_progress_sq_v1",
+  "train_examples": 6578,
+  "train_metrics": {
+    "accuracy": 0.9042773493325487,
+    "brier": 0.10139089960843622,
+    "count": 6578.0,
+    "positive_rate": 0.08213257565528538,
+    "weighted_log_loss": 0.44359348035499613
+  },
+  "val_examples": 1878,
+  "val_metrics": {
+    "accuracy": 0.8574947240687973,
+    "brier": 0.12028739714385711,
+    "count": 1878.0,
+    "positive_rate": 0.07779905406512014,
+    "weighted_log_loss": 0.47985379056257804
+  }
+}

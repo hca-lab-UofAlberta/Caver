@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CAVER Run Manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run",
+    "study",
+    "cluster",
+    "code",
+    "paths",
+    "slurm",
+    "components",
+    "data",
+    "seeds",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "id",
+        "created_at_utc",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "created_at_utc": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "study": {
+      "type": "object",
+      "required": [
+        "stage",
+        "method",
+        "task",
+        "seed",
+        "budget"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "budget": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "cluster": {
+      "type": "object",
+      "required": [
+        "site",
+        "account",
+        "partition",
+        "qos",
+        "gpu_type",
+        "gpus",
+        "cpus_per_task",
+        "memory",
+        "time_limit"
+      ]
+    },
+    "code": {
+      "type": "object",
+      "required": [
+        "repo_root",
+        "git_commit",
+        "git_branch"
+      ]
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "run_dir",
+        "job_script",
+        "slurm_stdout",
+        "slurm_stderr"
+      ]
+    },
+    "slurm": {
+      "type": "object",
+      "required": [
+        "job_name",
+        "job_id",
+        "submission_host",
+        "submission_user"
+      ]
+    },
+    "components": {
+      "type": "object",
+      "required": [
+        "openpi",
+        "gesim",
+        "pi_step_nft",
+        "rlinf",
+        "libero"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "template_partitions"
+      ]
+    },
+    "seeds": {
+      "type": "object",
+      "required": [
+        "policy_sampling",
+        "selector_sampling",
+        "backend_sampling",
+        "bootstrap_mask"
+      ]
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
+

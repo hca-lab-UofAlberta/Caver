@@ -1,0 +1,1689 @@
+# CAVER on SDRE: Overall Plan
+
+## What CAVER is actually claiming
+
+CAVER is not a new RL optimizer. It is a selective-verification layer wrapped around a fixed `pi-StepNFT` executed-trajectory backend. At each decision context it samples `K=4` candidate chunks from `pi0.5`, filters them through a deterministic safety shield, scores them with frozen-provider features plus a small proxy head, executes one safe candidate with exact logged propensity, converts the real outcome into doubly robust pseudo-outcomes, refits a calibrator, and only admits confident executed trajectories into the unchanged backend.
+
+The experimental program in the proposal is explicitly staged:
+
+- Proposal Stage 0: simulation proxy stage on five LIBERO tasks for debugging, calibration, selector tuning, and matched-budget comparisons.
+- Proposal Stage 1: real PiPER study on three tasks after the simulation stack is stable.
+
+For SDRE, that means we should treat LIBERO as the first trusted-execution stage and not skip directly to PiPER.
+
+## Locked protocol from the proposal
+
+- Backbone: pretrained `pi0.5` from `openpi`
+- Main backend: `pi-StepNFT`
+- Frozen provider: GE-Sim, with contingency local provider only if GE-Sim integration fails early
+- Candidate protocol: `K=4`, `H=4`, `0.1 s` control interval
+- Round size: `B_round=25` counted decision contexts
+- Main budgets: `N in {25, 50, 100, 200}`
+- Stage-0 tasks: block-to-tray, can-to-bowl, two-block stack, relocate-to-region, simple drawer/handle open
+- Stage-1 tasks: block-to-tray, can-to-bowl, two-block stack
+- Main baselines: full CAVER, real-only `pi-StepNFT`, WoVR if feasible, plus attribution ablations
+
+## SDRE facts confirmed on 2026-04-01
+
+| Item | Confirmed state |
+|---|---|
+| Slurm account | `p57098` |
+| User association | QoS access: `interactive,normal`; `DefaultAccount=p57098`; no `DefaultQOS` set |
+| Partitions | `cpu`, `gpu-l40s`, `gpu-h200` |
+| Partition max walltime | `7-00:00:00` for both `gpu-l40s` and `gpu-h200` |
+| QoS max walltime | `normal=7-00:00:00`, `interactive=08:00:00` |
+| GPU type specifiers | `gpu:l40s` and `gpu:h200` |
+| Safe request forms | `--gres=gpu:l40s:1` / `--gres=gpu:h200:1`; typed `--gpus-per-node=l40s:1` / `h200:1` should also match current GRES names |
+| GPU topology | `gpu-h200`: 6 nodes, `8x H200` each; `gpu-l40s`: mostly `4x L40S`, but one node has only `3x L40S` |
+| Current module baseline | `StdEnv/2023` is loaded and default |
+| Visible CUDA modules | `cuda/12.2`, `12.6`, `12.9` |
+| Visible Python modules | `python/3.10.13`, `3.11.5`, `3.12.4`, `3.13.2`, `3.14.2`; `python/3.8.10` exists under `StdEnv/2020` |
+| Anaconda module | none visible |
+| cuDNN | not shown by plain `module avail`, but `cudnn/9.10.0.56` and newer exist via `module spider`; `cudnn/9.10.0.56` loaded successfully with CUDA `12.6` |
+| Storage mounts | `/projects` 91T total, `/rdss` 3.6P total, `/uhome` 46T total |
+| Scratch | `SCRATCH=/scratch/euijin1` is set, but `/scratch/euijin1` does not exist here |
+| Packaging/container tools | no visible `conda`, `mamba`, `micromamba`, `uv`, `docker`, `apptainer`, or `singularity` in this login environment |
+
+## SDRE-adapted operating decisions
+
+- Use `/projects/p57098/euijin1/Caver` for active code, live run state, and iterative debugging.
+- Use `/rdss/p57098/euijin1/caver` for large long-retention logs and archived artifacts because it has materially more headroom.
+- Because neither the partitions nor the user association define a default QoS, always pass `--qos=interactive` or `--qos=normal` explicitly in Slurm commands.
+- Active paths already created:
+  - `/projects/p57098/euijin1/Caver/logs/slurm`
+  - `/projects/p57098/euijin1/Caver/logs/runtime`
+  - `/projects/p57098/euijin1/Caver/runs`
+- Archive paths already created:
+  - `/rdss/p57098/euijin1/caver/logs/slurm`
+  - `/rdss/p57098/euijin1/caver/logs/runtime`
+  - `/rdss/p57098/euijin1/caver/artifacts`
+- Use `gpu-l40s + interactive` for smoke tests, short bring-up runs, and lighter LIBERO debugging.
+- Use `gpu-l40s + normal` or `gpu-h200 + normal` for long experiment jobs. Escalate to `gpu-h200` only when memory/throughput demands justify it.
+- Do not assume the paper's `conda` and Docker commands are directly usable on SDRE. The current cluster path is modules plus `venv`, with RLinf/WoVR treated as conditional until a non-Docker path is verified.
+
+## Recommended environment matrix
+
+- `env-libero`
+  - Intended use: LIBERO compatibility path
+  - Candidate stack: `StdEnv/2020 + python/3.8.10`
+  - Notes: matches the proposal's Python-era expectation better than the 2023 stack
+- `env-caver-train`
+  - Intended use: `openpi`, `pi-StepNFT`, CAVER training code
+  - Candidate stack: `StdEnv/2023 + gcc/12.3 + cuda/12.6 + cudnn/9.10.0.56 + python/3.11.5`
+  - Notes: `openpi`'s `pyproject.toml` requires Python `>=3.11`; `pi-StepNFT` also allows `3.11`
+- `env-caver-py310`
+  - Intended use: fallback compatibility path
+  - Candidate stack: `StdEnv/2023 + gcc/12.3 + cuda/12.6 + cudnn/9.10.0.56 + python/3.10.13`
+  - Notes: keep for components that still want Python `3.10`
+- `env-gesim`
+  - Intended use: GE-Sim integration
+  - Candidate stack: start with the 2023/CUDA 12.6/Python 3.10 path, then adjust only if GE-Sim forces a different version combination
+- `env-rlinf`
+  - Intended use: WoVR baseline
+  - Status: unresolved because the proposal assumes Docker while SDRE currently does not expose Docker or Apptainer in this shell
+
+## Rough stage map
+
+Our decomposition is more operational than the proposal's paper stages.
+
+- Our Stage A-B: cluster and software bring-up
+- Our Stage C-E: proposal Stage 0 on LIBERO
+- Our Stage F-G: proposal Stage 1 on PiPER and final reporting
+
+## Stage summary
+
+- Stage A: SDRE bring-up and reproducibility scaffold
+- Stage B: pinned software stack bring-up on SDRE
+- Stage C: LIBERO Stage-0 harness and data protocol
+- Stage D: CAVER core implementation on the simulation harness
+- Stage E: Stage-0 LIBERO experiments, selector freezing, and attribution
+- Stage F: PiPER transfer readiness and real-interface bring-up
+- Stage G: Stage-1 real study and packaging
+
+## Immediate execution order
+
+1. Finish Stage A by writing Slurm helpers, manifest layout, and environment bootstrap scripts.
+2. Finish Stage B with working module-plus-venv installs for `openpi`, `LIBERO`, and `pi-StepNFT`.
+3. Run Stage C and Stage D until one complete LIBERO round works end to end.
+4. In Stage E, run `CAVER vs real-only pi-StepNFT` first, then attribution ablations. Attempt WoVR only after the non-Docker path is clear.
+5. Do not start Stage F real-robot work until Stage E freezes selector settings and produces stable logs and curves.
+
+## Current progress snapshot
+
+- Stage A-B scaffolding is in place and the SDRE-native environment split is established.
+- The public OpenPI `pi05_libero` checkpoint now caches under `/projects/p57098/euijin1/Caver/third_party/openpi-cache`.
+- Native OpenPI serving with the default LIBERO checkpoint restores and binds successfully on `gpu-l40s`.
+- Stage-0 split-bridge smoke completed on SDRE with:
+  - policy server: native OpenPI on `env-caver-train`
+  - simulator: LIBERO on `env-libero`
+  - renderer backend: `MUJOCO_GL=osmesa`
+  - Slurm job: `5329`
+  - result artifact: `/projects/p57098/euijin1/Caver/runs/stage0__openpi-native-smoke__libero_spatial__seed7__budget0__20260402T014201Z/results/libero_eval.json`
+- The compute-node `egl` path is still blocked for LIBERO on `gpu-l40s`; `osmesa` is the current working fallback.
+- Stage C task-family freezing is now in progress under `metadata/stage0/`:
+  - semantic proxy spec: `/projects/p57098/euijin1/Caver/metadata/stage0/libero_stage0_task_families.json`
+  - generated partition manifest: `/projects/p57098/euijin1/Caver/metadata/stage0/libero_stage0_partitions.json`
+- A key LIBERO constraint is now explicit: stock tasks expose only `50` init-state templates each on this installation, so the proposal's disjoint `24 seed + 20 val + 20 test` split cannot be satisfied per single concrete task.
+- The current SDRE answer is to use five semantic Stage-0 proxy families, each backed by three concrete `libero_90` tasks:
+  - per-family counts: `24` seed, `20` val, `20` test, `86` train
+  - global counts: `120` seed, `100` val, `100` test, `430` train
+- That family-level partitioning preserves disjoint Stage-0 semantics and still covers the proposal's maximum online training budget `N=200`.
+- The manifest-aware Stage-0 runner is now implemented and smoke-tested:
+  - wrapper: `/projects/p57098/euijin1/Caver/scripts/stage0/run_stage0_partition_eval.sh`
+  - seed warm-start wrapper: `/projects/p57098/euijin1/Caver/scripts/stage0/collect_stage0_warm_start.sh`
+  - dummy seed-partition smoke artifact: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_partition_dummy.json`
+  - dummy context ledger: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_partition_dummy.jsonl`
+- The warm-start wrapper itself is also exercised end to end:
+  - wrapper smoke artifact: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_seed_wrapper_dummy.json`
+  - wrapper context ledger: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_seed_wrapper_dummy.jsonl`
+- Stage-0 chunk-trace capture and replay-buffer conversion now exist:
+  - evaluator trace flag: `/projects/p57098/euijin1/Caver/scripts/bridge/libero_remote_eval.py` via `--transition-trace-path`
+  - Stage-0 wrapper pass-through: `/projects/p57098/euijin1/Caver/scripts/stage0/run_stage0_partition_eval.sh`
+  - warm-start wrapper pass-through: `/projects/p57098/euijin1/Caver/scripts/stage0/collect_stage0_warm_start.sh`
+  - conversion script: `/projects/p57098/euijin1/Caver/scripts/stage0/convert_stage0_trace_to_rlinf_demo.py`
+  - conversion wrapper: `/projects/p57098/euijin1/Caver/scripts/stage0/convert_stage0_trace_to_rlinf_demo.sh`
+- The trace-and-convert path is smoke-validated locally:
+  - chunk-trace smoke summary: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_trace_smoke.json`
+  - chunk-trace smoke ledger: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_trace_smoke_contexts.jsonl`
+  - chunk-trace smoke artifact: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_trace_smoke_chunks.jsonl`
+  - chunk-step demo artifact: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_trace_smoke_demo.pt`
+  - chunk-step demo summary: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_trace_smoke_demo.summary.json`
+  - primitive-step fallback demo artifact: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_trace_smoke_primitive_demo.pt`
+- The replay-buffer target is now clarified:
+  - the public `pi-StepNFT` `robot_demo` path loads only into `SACReplayBuffer`
+  - the stock public NFT actor path still has no native offline demo ingest hook
+  - current conversion therefore targets SAC-compatible replay items, not direct NFT warm-start tuples
+- The first full Stage-0 seed collection is now running on Slurm:
+  - launcher: `/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_seed_warm_start.sh`
+  - job id: `5332`
+  - node: `l40s-01`
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T033646Z`
+  - expected summary artifact: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T033646Z/results/stage0_seed_warm_start.json`
+  - expected context ledger: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T033646Z/results/stage0_seed_warm_start_contexts.jsonl`
+  - current status checked on `2026-04-01`: `RUNNING` for `48:11` on `l40s-01`
+  - limitation: `5332` was launched before trace support existed and does not have `--transition-trace-path`, so it cannot be converted into a replay-buffer demo artifact after the fact
+- A second full Stage-0 seed collection rerun is now active specifically for trace-backed warm-start conversion:
+  - job id: `5333`
+  - node: `l40s-01`
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T043351Z`
+  - current status checked on `2026-04-01`: `RUNNING` for `00:13` on `l40s-01`
+  - current observed progress in Slurm log: `starting LIBERO evaluation: mode=manifest contexts=120` and `context 1/120`
+  - live trace artifact now present: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T043351Z/results/stage0_seed_warm_start_chunks.jsonl`
+  - expected summary artifact: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T043351Z/results/stage0_seed_warm_start.json`
+  - expected context ledger: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T043351Z/results/stage0_seed_warm_start_contexts.jsonl`
+  - expected conversion target after completion: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T043351Z/results/stage0_seed_warm_start_demo.pt`
+- The `5333` rerun completed, but it is not a valid full warm-start trace:
+  - final state on `2026-04-01`: `COMPLETED`, exit code `0`, elapsed `00:48:19`
+  - root cause: the job launched on the same node as `5332` and reused port `8000`
+  - its own OpenPI server failed to bind with `OSError: [Errno 98] ... address already in use`
+  - the LIBERO client instead connected to `5332`'s server, then started failing with `ConnectionClosedError` once `5332` finished
+  - observed fallout: only `7/120` successes, `103` error contexts, and traces for only `18` contexts before the socket died
+  - do not use `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T043351Z` as the authoritative seed dataset
+- One submission bug was found and fixed during launch bring-up:
+  - initial job `5331` failed immediately because `collect_stage0_warm_start.sh` did not accept `--manifest-path`
+  - the wrapper interface was patched and the corrected first rerun was submitted as job `5332`
+- One follow-up wrapper gap was also fixed:
+  - `collect_stage0_warm_start.sh` and `run_stage0_partition_eval.sh` now default `--transition-trace-path` into `${CAVER_RUN_DIR}/results/...`
+  - that fix is what makes the live `5333` trace file land in the run directory automatically
+- A second follow-up runtime bug is now fixed:
+  - Stage-0 Slurm jobs no longer default to a shared websocket port `8000`
+  - `scripts/common.sh` now derives a Slurm-scoped loopback port, and the bridge wrappers use it when `--port` is omitted
+  - this prevents same-node jobs from aliasing each other's policy servers
+- The clean trace-authoritative rerun completed successfully as job `5334`:
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T053122Z`
+  - derived port: `23334`
+  - final Slurm state on `2026-04-02`: `COMPLETED`, exit code `0`, elapsed `05:36:10`
+  - authoritative seed summary: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T053122Z/results/stage0_seed_warm_start.json`
+  - authoritative trace ledger: `/projects/p57098/euijin1/Caver/runs/stage0__seed-warm-start__libero-stage0-seed__seed7__budget0__20260402T053122Z/results/stage0_seed_warm_start_chunks.jsonl`
+  - final counts: `120/120` contexts, `28` successes, `0` errors, `8456` chunk traces, traces covering all `120` contexts
+- The full seed trace surfaced a scale issue in the original converter:
+  - authoritative trace size is `71G`
+  - the first monolithic conversion attempt tried to materialize the entire JSONL and full demo list in memory and did not complete
+- The Stage-0 demo path is now upgraded for SDRE-scale traces:
+  - converter now supports `--output-mode sharded_manifest` with bounded `--max-items-per-shard`
+  - `pi-StepNFT` replay loading now accepts sharded demo manifests in `rlinf.data.replay_buffer.SACReplayBuffer.create_from_demo(...)`
+  - smoke sharded artifact from the real `5334` trace: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_seed_warm_start_demo_smoke.manifest.json`
+  - smoke sharded summary: `/projects/p57098/euijin1/Caver/logs/runtime/stage0_seed_warm_start_demo_smoke.summary.json`
+- The full sharded conversion completed as a separate tracked CPU job:
+  - submission wrapper: `/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_seed_warm_start_conversion.sh`
+  - job id: `5392`
+  - node: `cpu-01`
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stage0__seed-demo-convert__libero-stage0-seed__seed7__budget0__20260402T203345Z`
+  - output manifest target: `/projects/p57098/euijin1/Caver/runs/stage0__seed-demo-convert__libero-stage0-seed__seed7__budget0__20260402T203345Z/results/stage0_seed_warm_start_demo.manifest.json`
+  - summary target: `/projects/p57098/euijin1/Caver/runs/stage0__seed-demo-convert__libero-stage0-seed__seed7__budget0__20260402T203345Z/results/stage0_seed_warm_start_demo.summary.json`
+  - final state on `2026-04-02`: `COMPLETED`, exit code `0`, elapsed `01:31:44`
+  - final artifact shape: `8456` demo items covering all `120` contexts, written as `67` shard files with `max_items_per_shard=128`
+- The Stage-D backend bring-up path is now materially clearer:
+  - the real warm-start artifact for RLinf is `/projects/p57098/euijin1/Caver/runs/stage0__seed-demo-convert__libero-stage0-seed__seed7__budget0__20260402T203345Z/results/stage0_seed_warm_start_demo.manifest.json`
+  - the converted replay items use `action=(35,)`, so the Stage-C trace path matches RLinf's existing `5 x 7` OpenPI-LIBERO action layout
+  - the repaired `openpi` venv can now import `openpi`, `rlinf`, `libero`, and `examples.embodiment.train_embodied_agent` in one interpreter when launched through `scripts/env/with_openpi_pistepnft_libero_train.sh`
+  - `hydra-core` had to be upgraded to `1.3.2` in that venv because the upstream `1.2.0` build crashes on Python `3.11` during RLinf's Hydra entrypoint import
+  - `ray 2.49.1+computecanada`, `accelerate`, and `tensorboard` are now installed in the same venv to make the RLinf embodied runner importable on SDRE
+- The remaining hard blocker before the first warm-start SAC smoke is checkpoint format conversion:
+  - RLinf's OpenPI loader expects a PyTorch directory containing `model.safetensors`
+  - the cached public OpenPI `pi05_libero` checkpoint under `/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero` is JAX/Orbax only
+  - new wrappers now exist for that bridge:
+    - train runtime wrapper: `/projects/p57098/euijin1/Caver/scripts/env/with_openpi_pistepnft_libero_train.sh`
+    - OpenPI overlay repair helper: `/projects/p57098/euijin1/Caver/scripts/openpi/install_transformers_replace.sh`
+    - conversion wrapper: `/projects/p57098/euijin1/Caver/scripts/openpi/convert_openpi_checkpoint_to_pytorch.sh`
+    - conversion submitter: `/projects/p57098/euijin1/Caver/scripts/slurm/submit_openpi_checkpoint_conversion.sh`
+    - first SAC smoke launcher: `/projects/p57098/euijin1/Caver/scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh`
+    - first SAC smoke submitter: `/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_seed_warm_start_smoke.sh`
+- The first conversion attempt found a missing OpenPI runtime step rather than a modeling bug:
+  - job `5393` failed on `2026-04-02 22:11:53` America/Edmonton with `ValueError: transformers_replace is not installed correctly`
+  - root cause: the `openpi` venv had the correct `transformers==4.53.2`, but not the upstream `transformers_replace` overlay in site-packages
+  - fix: `scripts/openpi/install_transformers_replace.sh` now repairs that overlay automatically and is invoked by the Stage-D train and conversion wrappers
+- The corrected Stage-D chain is now live:
+  - conversion job `5395` completed successfully on `2026-04-02 22:20:02` America/Edmonton after `00:01:19`
+  - conversion run dir: `/projects/p57098/euijin1/Caver/runs/staged__openpi-pytorch-convert__pi05_libero__seed0__budget0__20260403T041843Z`
+  - output checkpoint now exists under `/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch`
+  - smoke retries `5396` through `5399` only exposed Hydra config-shape issues, not backend runtime crashes
+  - resolved smoke issues:
+    - nonexistent upstream alias `model/pi05`
+    - missing additive `+...=` on SAC/data-only keys under Hydra struct mode
+    - missing additive `+...=` on `actor.model.openpi.use_nft_loss`
+    - incorrect additive override on existing `actor.model.openpi.solver_type`
+  - the first runtime-visible smoke `5400` reached local Ray startup but was cancelled at the full `02:00:00` walltime on `2026-04-03 00:24:32` America/Edmonton
+  - the replacement smoke path now uses the 10-item smoke demo manifest, unbuffered Python, a 1-env / 5-step budget, and `+actor.model.openpi.pytorch_compile_mode=null`
+  - the smaller follow-up smoke `5401` still timed out on `2026-04-03 04:07:33` America/Edmonton with no `results/rlinf_logs` tree and only one runtime signal: local Ray startup
+  - because even `train_embodied_agent.py` did not flush its first config dump, the current working hypothesis is that the stall sits inside `validate_cfg(...)` or early RLinf cluster bring-up before runner construction
+  - the next debug iteration is now instrumented with `CAVER_STAGE_DEBUG=1` stage markers in:
+    - `examples/embodiment/train_embodied_agent.py`
+    - `rlinf.config.validate_cfg(...)` and `validate_embodied_cfg(...)`
+    - `rlinf.scheduler.cluster.Cluster`
+    - `rlinf.data.replay_buffer.SACReplayBuffer.create_from_demo(...)`
+  - observability probe `5402` has now finished with `TIMEOUT` on `2026-04-03 07:17:03` America/Edmonton
+  - `5402` stage markers isolate the stall to local `ray.init(...)` during RLinf cluster bring-up, after the fallback from `address='auto'` and before `ray.init()` returns
+  - the next isolation layer removed RLinf entirely and produced a concrete fix path:
+    - `5403`: failed immediately on `2026-04-03 12:05:27` America/Edmonton because of a quoting bug in the pure-Ray probe command
+    - `5404`: corrected pure-Ray probe, run dir `/projects/p57098/euijin1/Caver/runs/staged__ray-init-probe__no-dashboard__seed1__budget0__20260403T180549Z`
+    - `5404` final state: `TIMEOUT` on `2026-04-03 12:21:04` America/Edmonton after `00:15:15`
+    - `5404` still stopped at `[ray-probe] before ray.init()` plus `Started a local Ray instance.`
+    - new deep probe tooling now exists:
+      - `/projects/p57098/euijin1/Caver/scripts/debug/ray_init_probe.py`
+      - `/projects/p57098/euijin1/Caver/scripts/debug/run_ray_connect_probe.sh`
+    - `5405`: exposed an AF_UNIX socket-path overflow because `RAY_TMPDIR` was nested too deeply under the per-run directory
+    - `5406`: failed immediately because the new probe wrapper was not executable
+    - `5407`: confirmed the first temp-root shortening was still not short enough
+    - fix: `scripts/common.sh` now derives a short shared Ray temp root at `/projects/p57098/euijin1/ray/<jobid>`, and the train/probe wrappers default `RAY_TMPDIR` to that location
+    - `5408`: first deep probe to reach Ray `CoreWorker` construction; live session logs showed the raylet spawning `64` workers despite `--cpus-per-task=8`
+    - `5409`: CPU-limited pure-Ray probe, run dir `/projects/p57098/euijin1/Caver/runs/staged__ray-connect-probe__cpulimited__seed0__budget0__20260403T183710Z`
+    - `5409` completed successfully on `2026-04-03 12:37:29` America/Edmonton after `00:00:19`
+    - `5409` is the first run to prove `ray.init(...)` returns normally on SDRE when local Ray is constrained to the Slurm CPU/GPU allocation
+  - the RLinf fallback path is now patched to match `5409`:
+    - `/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/scheduler/cluster/cluster.py` now passes Slurm-derived CPU and GPU limits into local `ray.init(...)`
+    - the local fallback also keeps `include_dashboard=False`
+  - smoke retry `5410` confirmed the Ray fix and exposed the next real downstream constraint:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184143Z`
+    - start time: `2026-04-03 12:41:43` America/Edmonton
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 12:42:05` America/Edmonton after `00:00:22`
+    - `5410` got through local `ray.init(...)`, NodeProbe, and Ray manager launch
+    - new failure: `env.train.max_steps_per_rollout_epoch` must be divisible by `actor.model.num_action_chunks`
+    - root cause: the extra-minimal `--rollout-steps 1` debug override was invalid for `libero_goal_ppo_openpi_pi05`, which sets `num_action_chunks: 5`
+  - the smoke launcher now guards that configuration earlier:
+    - `/projects/p57098/euijin1/Caver/scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh` now validates `--rollout-steps` against the selected RLinf config before any Slurm GPU run starts
+  - smoke retry `5411` confirmed the next downstream issue:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184435Z`
+    - start time: `2026-04-03 12:44:36` America/Edmonton
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 12:44:59` America/Edmonton after `00:00:23`
+    - `5411` got through cluster validation, placement, actor/rollout/env group launch, and resolved-config dump
+    - new failure: `ModuleNotFoundError: No module named 'rlinf.data.datasets.math'`
+    - root cause: `/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/data/datasets/__init__.py` imported `MathDataset` unconditionally even though `math.py` is absent in this checkout
+    - fix: the math import is now optional, and only `data.type == "math"` raises when that module is unavailable
+    - local validation under the train wrapper now succeeds: `create_rl_dataset(... type='robot_demo' ...)` returns `SACReplayBuffer` and loads the `10`-item smoke manifest
+  - smoke retry `5412` was the next confirmation job:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T184644Z`
+    - start time: `2026-04-03 12:46:44` America/Edmonton
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 12:48:10` America/Edmonton after `00:01:26`
+    - `5412` got through replay-buffer load, `EmbodiedRunner` construction, and into `runner.init_workers()`
+    - authoritative worker failure: `EmbodiedSACFSDPPolicy.init_worker()` raised `FileNotFoundError` for missing checkpoint norm stats
+    - fixes applied:
+      - `/projects/p57098/euijin1/Caver/scripts/openpi/convert_openpi_checkpoint_to_pytorch.sh` now copies the source `assets/` tree into the converted PyTorch checkpoint
+      - `/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/models/embodiment/openpi/__init__.py` now loads norm stats from `checkpoint_dir/assets` with a root fallback
+      - the current `pi05_libero_pytorch` checkpoint has been repaired in place and now contains `assets/physical-intelligence/libero/norm_stats.json`
+      - `rlinf.scheduler.cluster.Cluster.signal_handler` now handles `list_actors(...)` failures gracefully so local-Ray runs without the dashboard do not hide the real worker error
+  - smoke retry `5413` was the next confirmation job:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185123Z`
+    - start time: `2026-04-03 12:51:23` America/Edmonton
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 12:53:33` America/Edmonton after `00:02:10`
+    - `5413` got through norm-stat loading and actor model initialization
+    - authoritative worker failure: `EmbodiedSACFSDPPolicy.init_worker()` hit `AssertionError` because SAC optimizer construction found zero critic parameters
+    - fix: `/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/workers/actor/fsdp_sac_policy_worker.py` now treats both `q_head` and `value_head` parameter names as critic-side for optimizer split and target-model updates
+  - smoke retry `5414` was the next confirmation job:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T185558Z`
+    - start time: `2026-04-03 12:55:58` America/Edmonton
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 12:59:03` America/Edmonton after `00:03:05`
+    - `5414` got through actor optimizer build, rollout worker model init, and into env-worker import/setup
+    - authoritative env-worker failure: `ModuleNotFoundError: No module named 'tensorflow'`
+    - fix: `/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/envs/utils.py` now treats TensorFlow as optional and only requires it for the TensorFlow-based crop helpers
+    - local validation under the train wrapper now confirms `rlinf.envs.utils` imports successfully without TensorFlow
+  - smoke retry `5415` was the next confirmation job:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T190019Z`
+    - start time: `2026-04-03 13:00:19` America/Edmonton
+    - node: `l40s-01`
+    - walltime cap: `00:45:00`
+    - ETA upper bound from Slurm walltime: `2026-04-03 13:45:19` America/Edmonton
+  - `5415` failed on `2026-04-03 13:03:21` America/Edmonton after `00:03:02`
+    - it got through env import and into `EnvWorker.init_worker()`
+    - authoritative failure: LIBERO task init-state loading hit PyTorch 2.6+ `weights_only=True` default and raised `_pickle.UnpicklingError`
+    - fixes applied:
+      - `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/LIBERO/libero/libero/benchmark/__init__.py` now uses `torch.load(..., weights_only=False)` for trusted init-state assets
+      - `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/LIBERO/libero/lifelong/metric.py` and `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/LIBERO/libero/lifelong/evaluate.py` are patched the same way
+      - `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/LIBERO/libero/lifelong/utils.py` now loads trusted local checkpoints with `weights_only=False`
+      - local validation under the train wrapper now confirms `get_task_init_states(0)` succeeds and returns an array of shape `(50, 79)`
+  - smoke retry `5416` closed the original embedded-LIBERO branch:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T190505Z`
+    - start time: `2026-04-03 13:05:07` America/Edmonton
+    - node: `l40s-01`
+    - final state: `FAILED` on `2026-04-03 13:07:31` America/Edmonton after `00:02:24`
+    - it got through replay ingest, actor setup, rollout setup, and patched LIBERO init-state loading
+    - authoritative failure: the embedded Python `3.11` LIBERO runtime still crashed during offscreen renderer construction
+  - renderer retries `5417` and `5418` confirmed that this is a train-runtime renderer compatibility problem, not another SAC/backend bug:
+    - `5417`: forced `MUJOCO_GL=osmesa`, failed with a segmentation fault during `OffScreenRenderEnv(...)`
+    - `5418`: forced `MUJOCO_GL=egl`, failed during EGL device/display initialization
+    - operational conclusion: keep online LIBERO on the split bridge instead of inside the Python `3.11` RLinf training interpreter
+  - Stage-D then pivoted to the actual minimum backend objective:
+    - add a demo-only warm-start smoke path that verifies replay-buffer ingest and one SAC update without constructing live rollout/env workers
+    - `train_embodied_agent.py` now supports `runner.offline_demo_only=true`
+    - `EmbodiedRunner` now supports a demo-only execution path
+    - `fsdp_sac_policy_worker.py` now allows demo-only SAC training when the replay buffer is empty but the demo buffer is populated
+    - `scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh` now defaults to that path and exposes `--online-rollout` only when we intentionally want the old behavior
+  - demo-only smoke `5419` verified the new control path and exposed the first model-side gap:
+    - final state: `FAILED` on `2026-04-03 13:26:48` America/Edmonton after `00:02:08`
+    - the run skipped rollout/env correctly and loaded the Stage-0 demo manifest
+    - new failure: OpenPI RL forward path did not implement `ForwardType.SAC` / `ForwardType.SAC_Q`
+  - demo-only smoke `5420` fixed that interface gap and exposed the next critic bug:
+    - final state: `FAILED` on `2026-04-03 13:32:54` America/Edmonton after `00:02:11`
+    - fix before `5420`: OpenPI RL model now implements `sac_forward(...)` and `sac_q_forward(...)`
+    - new failure: `critic_loss.backward()` had no grad because the pi05 config's `value_after_vlm=true` path bypassed action-conditioned suffix values
+  - demo-only smoke `5421` fixed the critic path and exposed a head-shape mismatch:
+    - final state: `FAILED` on `2026-04-03 13:35:53` America/Edmonton after `00:02:09`
+    - fix before `5421`: SAC-Q now forces suffix-conditioned value prediction
+    - new failure: suffix critic features are `1024`-dimensional, while the existing `value_head` expected `2048`
+  - demo-only smoke `5422` is the authoritative Stage-D success:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T193632Z`
+    - start time: `2026-04-03 13:36:33` America/Edmonton
+    - node: `l40s-01`
+    - final state: `COMPLETED` on `2026-04-03 13:39:10` America/Edmonton after `00:02:37`
+    - fix before `5422`: OpenPI now has a dedicated suffix critic head for `value_after_vlm=true` configs, and SAC-Q uses it for action-conditioned critic values
+    - authoritative completion evidence:
+      - `runner.init_workers completed`
+      - `runner.run completed`
+      - progress bar finished `1/1`
+      - metrics include `train/sac/critic_loss=0.000339`, `train/sac/actor_loss=0.0122`, `train/sac/alpha=0.01`, `train/critic/grad_norm=1.43`, and `train/actor/grad_norm=13.1`
+    - artifact path: `/projects/p57098/euijin1/Caver/runs/staged__seed-sac-smoke__libero_goal-task-0__seed7__budget0__20260403T193632Z/results/rlinf_logs/replay_buffer_0.pkl`
+  - current Stage-D interpretation:
+    - the first warm-start replay-buffer ingest plus one SAC update now works end to end on SDRE
+    - that closes the original job-failure chain for backend bring-up
+    - online execution should still use the split bridge, not embedded LIBERO inside the Python `3.11` train runtime
+- The shared bridge remains backward-compatible after the manifest upgrade:
+  - legacy dummy smoke artifact: `/projects/p57098/euijin1/Caver/logs/runtime/libero_legacy_dummy.json`
+- Stage E has now started with a working real-only baseline orchestrator:
+  - runner: `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_real_only_round.sh`
+  - submitter: `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_real_only_round.sh`
+  - the split-bridge evaluator now logs real-only selector metadata via `candidate_count`, `selection_policy`, and per-query selected-candidate propensities
+- The Stage-E one-context bring-up chain is now resolved:
+  - `5423`: failed because the new runner did not force `MUJOCO_GL=osmesa` and the LIBERO eval env fell back to EGL
+  - `5424`: failed because the earlier `weights_only=False` LIBERO patch was not compatible with the older Python `3.8` eval-side torch
+  - fix after `5424`: new compatibility helper `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/LIBERO/libero/libero/torch_compat.py` now loads trusted local assets across both torch generations
+  - `5425`: authoritative success, run dir `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget1__20260403T201608Z`
+  - `5425` final state: `COMPLETED` on `2026-04-03 14:20:14` America/Edmonton after `00:04:06`
+  - end-to-end outputs now exist for:
+    - online rollout summary: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget1__20260403T201608Z/results/real_only_online_eval.json`
+    - chunk trace ledger: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget1__20260403T201608Z/results/real_only_online_chunks.jsonl`
+    - replay demo manifest: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget1__20260403T201608Z/results/real_only_round_demo.manifest.json`
+    - replay snapshot after training: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget1__20260403T201608Z/results/rlinf_logs/replay_buffer_0.pkl`
+    - stitched workflow summary: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget1__20260403T201608Z/results/real_only_round_summary.json`
+- `5425` proves the first real-only Stage-E loop now works on SDRE:
+  - `1` split-bridge episode ran to completion
+  - selector logging captured `candidate_count=4`, `selection_policy=uniform`, selected indices `[3, 2, 2, 3]`, and exact per-query propensities `[0.25, 0.25, 0.25, 0.25]`
+  - trace conversion produced `4` demo items from `20` primitive steps
+  - the offline backend update completed and produced both TensorBoard logs and a replay-buffer snapshot
+- Stage-E legacy real-only rounds now have explicit online-budget accounting:
+  - `scripts/bridge/libero_remote_eval.py` now exposes `--count-legacy-contexts-as-online-budget`
+  - `scripts/stagee/run_stage0_real_only_round.sh` and `scripts/slurm/submit_stage0_real_only_round.sh` now enable that mode by default for legacy task selection
+- The first scaled one-task Stage-E run is now complete:
+  - job `5426`
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget25__20260403T202918Z`
+  - start time: `2026-04-03 14:29:18` America/Edmonton
+  - final state: `COMPLETED` on `2026-04-03 14:40:41` America/Edmonton after `00:11:23`
+  - node: `l40s-01`
+  - target workload completed: `25` contexts on `libero_goal` task `0`
+  - online budget validation: `25` context units and `25` online-training budget units in `real_only_online_eval.json`
+  - end-to-end outputs now exist for:
+    - online rollout summary: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget25__20260403T202918Z/results/real_only_online_eval.json`
+    - context ledger: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget25__20260403T202918Z/results/real_only_online_contexts.jsonl`
+    - chunk trace ledger: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget25__20260403T202918Z/results/real_only_online_chunks.jsonl`
+    - replay demo manifest: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget25__20260403T202918Z/results/real_only_round_demo.manifest.json`
+    - replay snapshot after training: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget25__20260403T202918Z/results/rlinf_logs/replay_buffer_0.pkl`
+    - stitched workflow summary: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__libero_goal-task-0__seed7__budget25__20260403T202918Z/results/real_only_round_summary.json`
+  - result counts: `25` episodes, `0` successes, `100` chunk traces, `100` demo items, and `500` primitive steps
+- Stage-E now also has a balanced cross-task manifest path:
+  - builder: `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/build_stage0_balanced_manifest.py`
+  - submitter: `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_real_only_budget.sh`
+  - the builder selects an equal number of `T_train_S0` contexts per Stage-0 proxy family before launching the existing real-only round runner
+- The first cross-task Stage-E budget run is live:
+- The first cross-task Stage-E budget run is now complete:
+  - job `5436`
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T002000Z`
+  - start time: `2026-04-03 18:20:01` America/Edmonton
+  - final state: `COMPLETED` on `2026-04-03 18:31:00` America/Edmonton after `00:10:59`
+  - node: `l40s-01`
+  - selection manifest: `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget25__offset0__seed7__all__20260404T002000Z.json`
+  - validated workload: `25` total contexts from `T_train_S0`, balanced as `5` contexts per family across all five Stage-0 proxy families
+  - online budget validation: `25` context units and `25` online-training budget units in `real_only_online_eval.json`
+  - no hidden rollout failures: the context ledger has `25` contexts and `0` per-context errors
+  - end-to-end outputs now exist for:
+    - online rollout summary: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T002000Z/results/real_only_online_eval.json`
+    - context ledger: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T002000Z/results/real_only_online_contexts.jsonl`
+    - chunk trace ledger: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T002000Z/results/real_only_online_chunks.jsonl`
+    - replay demo manifest: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T002000Z/results/real_only_round_demo.manifest.json`
+    - replay snapshot after training: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T002000Z/results/rlinf_logs/replay_buffer_0.pkl`
+    - stitched workflow summary: `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T002000Z/results/real_only_round_summary.json`
+  - result counts: `25` episodes, `0` successes, `100` chunk traces, `100` demo items, and `500` primitive steps
+- The full seed-`7` Stage-E balanced budget ladder is now validated:
+  - `5437`: `budget=50`, `COMPLETED` on `2026-04-03 20:12:13` America/Edmonton after `00:17:51`
+  - `5438`: `budget=100`, `COMPLETED` on `2026-04-03 20:43:10` America/Edmonton after `00:30:57`
+  - `5439`: `budget=200`, `COMPLETED` on `2026-04-03 21:41:13` America/Edmonton after `00:58:03`
+  - each budget tier used a balanced `T_train_S0` manifest slice across all five Stage-0 proxy families and reached `train_embodied_agent: runner.run completed`
+  - validated counts by budget:
+    - `50`: `50` contexts, `200` chunk traces, `200` demo items, `1000` primitive steps
+    - `100`: `100` contexts, `400` chunk traces, `400` demo items, `2000` primitive steps
+    - `200`: `200` contexts, `800` chunk traces, `800` demo items, `4000` primitive steps
+- Stage-E is now advancing with the provisional three-seed set `{7, 13, 29}` until the writeup pins exact numeric seed IDs.
+- The next seed ladder is now live on seed `13`:
+  - authoritative chain: `5440 -> 5442 -> 5444 -> 5445`
+  - all four seed-`13` budgets are now complete and validated:
+    - `25`: `25` contexts, `100` chunk traces, `100` demo items, `500` primitive steps
+    - `50`: `50` contexts, `200` chunk traces, `200` demo items, `1000` primitive steps
+    - `100`: `100` contexts, `400` chunk traces, `400` demo items, `2000` primitive steps
+    - `200`: `200` contexts, `800` chunk traces, `800` demo items, `4000` primitive steps
+  - final states:
+    - `5440`: `COMPLETED` on `2026-04-03 21:57:57` America/Edmonton after `00:10:38`
+    - `5442`: `COMPLETED` on `2026-04-03 22:15:27` America/Edmonton after `00:17:30`
+    - `5444`: `COMPLETED` on `2026-04-03 22:46:25` America/Edmonton after `00:30:58`
+    - `5445`: `COMPLETED` on `2026-04-03 23:44:35` America/Edmonton after `00:58:10`
+  - each tier stayed balanced across all five Stage-0 proxy families and reached `train_embodied_agent: runner.run completed`
+  - authoritative seed-`13` manifests:
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget25__offset0__seed13__all__20260404T034719Z.json`
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget50__offset0__seed13__all__20260404T034725Z.json`
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget100__offset0__seed13__all__20260404T034739Z.json`
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget200__offset0__seed13__all__20260404T034741Z.json`
+  - launch note: a mistaken dependency reference caused one rejected submission and a cancelled placeholder `5443`; the authoritative ladder is the chain listed above
+- The final provisional seed ladder is now live on seed `29`:
+  - authoritative chain: `5446 -> 5447 -> 5448 -> 5449`
+  - all four seed-`29` budgets are now complete and validated:
+    - `25`: `25` contexts, `100` chunk traces, `100` demo items, `500` primitive steps
+    - `50`: `50` contexts, `200` chunk traces, `200` demo items, `1000` primitive steps
+    - `100`: `100` contexts, `400` chunk traces, `400` demo items, `2000` primitive steps
+    - `200`: `200` contexts, `800` chunk traces, `800` demo items, `4000` primitive steps
+  - final states:
+    - `5446`: `COMPLETED` on `2026-04-04 00:02:03` America/Edmonton after `00:10:41`
+    - `5447`: `COMPLETED` on `2026-04-04 00:19:32` America/Edmonton after `00:17:29`
+    - `5448`: `COMPLETED` on `2026-04-04 00:50:29` America/Edmonton after `00:30:57`
+    - `5449`: `COMPLETED` on `2026-04-04 01:48:52` America/Edmonton after `00:58:23`
+  - each tier stayed balanced across all five Stage-0 proxy families and reached `train_embodied_agent: runner.run completed`
+  - the provisional three-seed real-only cross-task Stage-E ladder `{7, 13, 29}` is now fully validated
+  - authoritative seed-`29` manifests:
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget25__offset0__seed29__all__20260404T055121Z.json`
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget50__offset0__seed29__all__20260404T055128Z.json`
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget100__offset0__seed29__all__20260404T055130Z.json`
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_real_only__t_train_s0__budget200__offset0__seed29__all__20260404T055133Z.json`
+- The provisional three-seed real-only cross-task Stage-E ladder is now fully validated.
+- The first CAVER-specific code upgrade after that closure is now in place:
+  - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/bridge/libero_remote_eval.py` now writes the full sampled candidate bank into `caver_stage0_chunk_trace_v2`
+  - each chunk trace now carries the exact candidate propensity vector plus a safety-mask placeholder and reason-code slots
+  - per-context summaries now retain per-query candidate-probability vectors and safe-candidate counts
+- The first end-to-end CAVER scaffold smoke is now complete and authoritative:
+  - new scaffold pieces:
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/build_caver_round_artifacts.py`
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_caver_round.sh`
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_round.sh`
+  - pre-submit bug fix:
+    - the new shell wrappers were missing execute bits and were corrected before launch
+  - authoritative job:
+    - job `5480`
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260404T083302Z`
+    - start time: `2026-04-04 02:33:02` America/Edmonton
+    - final state: `COMPLETED` on `2026-04-04 02:49:11` America/Edmonton after `00:16:09`
+    - node: `l40s-01`
+  - workload:
+    - derived smoke manifest: `/projects/p57098/euijin1/Caver/logs/runtime/caver_smoke_balanced_manifest.json`
+    - source partition: `T_train_S0`
+    - selected family: `block_to_tray_proxy`
+    - backend task suite: `libero_90`
+    - backend task ids: `57,58,59`
+  - validated outcomes:
+    - online rollout succeeded on `5/5` contexts with `success_rate=1.0`
+    - selector scaffold wrote `caver_selector_summary.json` with `5/5` contexts carrying full candidate-bank logging and `159` total policy queries
+    - admission scaffold wrote `caver_admission_summary.json` with `5` admitted contexts, `0` rejected contexts, and `159` admitted trace records
+    - replay conversion wrote `caver_round_demo.manifest.json` with `159` demo items, `788` primitive steps, and `2` shards
+    - backend update completed and wrote `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260404T083302Z/results/rlinf_logs/replay_buffer_0.pkl`
+    - completion metrics included `train/sac/critic_loss=0.0151` and `train/sac/actor_loss=0.103`
+    - stitched workflow summary: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260404T083302Z/results/caver_round_summary.json`
+- The first balanced cross-family CAVER budget run is now complete and authoritative:
+  - new launcher:
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_budget.sh`
+  - authoritative manifest pair:
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_caver__t_train_s0__budget25__offset0__seed7__all__20260404T085600Z.json`
+    - `/projects/p57098/euijin1/Caver/logs/runtime/stagee_manifests/stagee_caver__t_train_s0__budget25__offset0__seed7__all__20260404T085600Z.summary.json`
+  - authoritative job:
+    - job `5481`
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T085600Z`
+    - start time: `2026-04-04 02:56:00` America/Edmonton
+    - final state: `COMPLETED` on `2026-04-04 03:08:58` America/Edmonton after `00:12:58`
+    - node: `l40s-01`
+  - workload:
+    - source partition: `T_train_S0`
+    - balanced allocation: `25` contexts total, `5` per proxy family
+    - selected families: `block_to_tray_proxy`, `container_insertion_proxy`, `two_object_stack_proxy`, `relocate_to_region_proxy`, `drawer_open_proxy`
+    - backend task suite: `libero_90`
+    - backend task ids: `6,7,11,16,17,46,47,48,57,58,59,63,73,74,75`
+  - validated outcomes:
+    - online rollout completed `25/25` contexts with `0` per-context errors and `success_rate=0.0`
+    - the budget ledger recorded `25` online-training units with `budget_domain=online_train`
+    - selector scaffold wrote `caver_selector_summary.json` with `25/25` contexts carrying candidate-bank logging and `100` total policy queries
+    - admission scaffold wrote `caver_admission_summary.json` with `25` admitted contexts, `0` rejected contexts, and `100` admitted trace records
+    - replay conversion wrote `caver_round_demo.manifest.json` with `100` demo items, `500` primitive steps, and `1` shard
+    - balanced family confirmation: `20` replay demo items per family
+    - backend update completed and wrote `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T085600Z/results/rlinf_logs/replay_buffer_0.pkl`
+    - completion metrics included `train/sac/critic_loss=0.0262` and `train/sac/actor_loss=0.0267`
+    - stitched workflow summary: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T085600Z/results/caver_round_summary.json`
+- The first nontrivial CAVER selector/admission path is now implemented and technically validated:
+  - new shared heuristic module:
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/caver_heuristic.py`
+  - runtime changes:
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/bridge/libero_remote_eval.py` now supports the frozen selector `caver_heuristic`
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/build_caver_round_artifacts.py` now implements the conservative admission rule `success_lcb_v1`
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_caver_round.sh` now skips replay conversion and backend training cleanly when admission yields zero contexts
+  - first launch bug:
+    - `5482` failed on `2026-04-04 03:44:13` America/Edmonton because `compute_selector_decision(...)` referenced `history` before defining it
+    - that defect is fixed in `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/caver_heuristic.py`
+  - authoritative post-fix smoke:
+    - `5483`
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-block_to_tray_proxy__seed7__budget5__20260404T094447Z`
+    - final state: `COMPLETED` on `2026-04-04 03:46:58` America/Edmonton after `00:02:11`
+    - validated outcomes:
+      - `5` contexts, `20` chunk traces, `0` successes, `0` per-context errors
+      - selector summary confirms non-uniform exact propensities under `caver_heuristic`
+      - admission summary confirms `0` admitted contexts and the clean zero-admission skip path
+  - first balanced rerun on the nontrivial selector:
+    - `5484`
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T094837Z`
+    - final state: `COMPLETED` on `2026-04-04 03:56:11` America/Edmonton after `00:07:34`
+    - validated outcomes:
+      - balanced workload: `25` contexts, `5` per proxy family
+      - online rollout: `25/25` contexts completed, `0` successes, `0` per-context errors, `100` chunk traces
+      - selector summary: `frozen_actionspace_softmax_v1`, `caver_heuristic`, `100` policy queries
+      - admission summary: `success_lcb_v1`, `0` admitted contexts, `25` rejected contexts, `0` admitted trace records
+      - replay conversion and backend training were skipped intentionally because admission rejected every context
+  - current conclusion:
+    - the nontrivial selector/admission plumbing is now stable on SDRE
+    - the current frozen action-space heuristic is too weak to produce any admitted data, so the next gain has to come from fitting the proxy-value input on actual Stage-0 seed/warm-start data rather than from more reruns of the same heuristic
+  - the fitted Stage-0 proxy-value path is now built:
+    - compact dataset: `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_seed_context_success_dataset.jsonl`
+    - dataset summary: `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_seed_context_success_dataset.summary.json`
+    - fitted logistic model: `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_logreg_v1.json`
+    - training summary: `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_logreg_v1.summary.json`
+    - validation metrics on the held-out context split: `accuracy=0.7665`, `weighted_log_loss=0.5640`, `brier=0.1867`
+  - live learned-proxy validation:
+    - job `5485`
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260404T101822Z`
+    - start time: `2026-04-04 04:18:22` America/Edmonton
+    - node: `l40s-01`
+    - upper-bound finish from Slurm walltime: `2026-04-04 05:18:22` America/Edmonton
+    - selector mode: `fitted_stage0_value_softmax_v1`
+    - value-proxy model path: `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_logreg_v1.json`
+  - `5485` completed cleanly on `2026-04-04 04:20:45` America/Edmonton after `00:02:23`
+    - `5` contexts, `20` chunk traces, `0` successes, `0` per-context errors
+    - selector summary now records `value_proxy_model_id=stage0_context_success_logreg_v1` under `selector_mode=fitted_stage0_value_softmax_v1`
+  - `5486` is the authoritative learned-proxy `budget=25` rerun:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T102122Z`
+    - final state: `COMPLETED` on `2026-04-04 04:28:51` America/Edmonton after `00:07:29`
+    - balanced workload: `25` contexts, `5` per proxy family
+    - outcomes:
+      - `25/25` contexts completed
+      - `0` successes and `0` per-context errors
+      - `100` chunk traces
+      - selector mode `fitted_stage0_value_softmax_v1`
+      - value-proxy model id `stage0_context_success_logreg_v1`
+      - `0` admitted contexts and `0` admitted trace records
+      - replay conversion and backend training skipped intentionally
+    - comparison to heuristic baseline `5484`: no verified success gain and no admitted-data gain at `budget=25`
+  - progress-aware target follow-up:
+    - new target mode `context_success_progress_sq_v1` is now supported by `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/train_stage0_value_proxy.py`
+    - authoritative progress-aware artifacts:
+      - `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_logreg_v1.json`
+      - `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_logreg_v1.summary.json`
+    - held-out metrics improved to `accuracy=0.8575`, `weighted_log_loss=0.4799`, `brier=0.1203`
+  - progress-aware live validation:
+    - `5487` smoke completed on `2026-04-04 05:37:24` America/Edmonton after `00:02:28`
+      - `5` contexts, `20` chunk traces, `0` successes, `0` admitted contexts
+    - `5488` balanced rerun completed on `2026-04-04 05:45:26` America/Edmonton after `00:07:36`
+      - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T113750Z`
+      - selector model id `stage0_context_success_progress_sq_logreg_v1`
+      - `25/25` contexts completed, `0` successes, `0` admitted contexts, `0` admitted trace records
+      - replay conversion and backend training skipped intentionally
+  - feature-map and regularization sweep:
+    - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/stage0_value_proxy.py` now supports optional squared-progress and family-progress interaction features
+    - local sweep dir: `/projects/p57098/euijin1/Caver/logs/runtime/value_proxy_sweep_20260404T0550`
+    - the family-curve variants all underperformed the simpler progress-aware model on held-out loss
+    - best offline variant from the sweep:
+      - `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_logreg_v2.json`
+      - `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_logreg_v2.summary.json`
+      - validation metrics `accuracy=0.8606`, `weighted_log_loss=0.4780`, `brier=0.1192`
+  - `5489` is the regularized rerun for that best-offline model:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T115303Z`
+    - final state: `COMPLETED` on `2026-04-04 06:00:32` America/Edmonton after `00:07:28`
+    - selector model id `stage0_context_success_progress_sq_logreg_v2`
+    - outcomes:
+      - `25/25` contexts completed
+      - `0` successes and `0` per-context errors
+      - `100` chunk traces
+      - `0` admitted contexts and `0` admitted trace records
+      - replay conversion and backend training skipped intentionally
+    - comparison to `5488`: no verified online gain from the regularization-only revision
+  - current conclusion:
+    - the SDRE CAVER path is now operational and repeatable, but scalar logistic value-proxy revisions are not enough to create admissions
+    - the next selector revision needs richer chunk-level or partial-progress supervision, not more reruns of the same compact target family
+  - first chunk-level selector revision is now also validated:
+    - runtime code:
+      - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/stage0_value_proxy.py` now supports base-feature-by-progress interaction blocks
+      - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/train_stage0_value_proxy.py` can train those interaction features directly on `chunk_success_label`
+    - local sweep dir:
+      - `/projects/p57098/euijin1/Caver/logs/runtime/value_proxy_chunk_success_sweep_20260404T0620`
+    - authoritative chunk-success artifact:
+      - `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_chunk_success_logreg_v2.json`
+      - `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_chunk_success_logreg_v2.summary.json`
+      - held-out metrics `accuracy=0.8121`, `weighted_log_loss=0.4705`, `brier=0.1487`
+  - `5490` smoke completed on `2026-04-04 06:28:08` America/Edmonton after `00:02:26`
+    - `5` contexts, `20` policy queries, `0` successes, `0` admitted contexts
+    - selector summary records `value_proxy_model_id=stage0_chunk_success_logreg_v2`
+  - `5491` is the authoritative balanced chunk-success rerun:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T122820Z`
+    - final state: `COMPLETED` on `2026-04-04 06:35:54` America/Edmonton after `00:07:34`
+    - outcomes:
+      - `25/25` contexts completed
+      - `0` successes and `0` per-context errors
+      - `100` chunk traces
+      - selector mode `fitted_stage0_value_softmax_v1`
+      - value-proxy model id `stage0_chunk_success_logreg_v2`
+      - `0` admitted contexts and `0` admitted trace records
+      - replay conversion and backend training skipped intentionally
+    - comparison to `5489`: no verified online gain from the first chunk-level objective either
+  - refined conclusion:
+    - the blocker is no longer infrastructure or simple target choice
+    - the next CAVER revision needs stronger per-candidate features or simulator-derived partial-progress labels, because label-only logistic objectives still leave the balanced LIBERO round at `0/25`
+
+## Native-horizon correction
+
+- On `2026-04-04`, Stage E identified a protocol bug in the balanced-budget submitters:
+  - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_real_only_budget.sh`
+  - `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_budget.sh`
+  - both were silently defaulting `--max-env-steps 20`
+- Implication:
+  - earlier balanced cross-family ladders are still valid SDRE smoke / reproducibility evidence
+  - they are not authoritative Stage-E scientific results
+- Fixed on `2026-04-04`:
+  - both submitters now default to the suite-native LIBERO horizon
+- Corrected native-horizon reruns now define the authoritative Stage-E path:
+  - seed `7`, live:
+    - `5499` real-only `budget=25`, run dir `/projects/p57098/euijin1/Caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260404T185442Z`
+    - `5500` CAVER `budget=25`, run dir `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260404T185442Z`
+    - both are confirmed from stderr to be running at `max_steps=400`
+    - live outcome signal:
+      - `5499` first four completed contexts all reached `success=True`
+      - `5500` first three completed contexts all reached `success=True`
+  - seed `7`, queued after the live pair:
+    - real-only `5505` (`50`), `5501` (`100`), `5504` (`200`)
+    - CAVER `5503` (`50`), `5502` (`100`), `5506` (`200`)
+  - seed `13` ladder launched:
+    - real-only `5507`, `5508`, `5509`, `5510`
+    - CAVER `5511`, `5512`, `5513`, `5514`
+  - seed `29` ladder launched:
+    - real-only `5515`, `5516`, `5517`, `5518`
+    - CAVER `5519`, `5520`, `5521`, `5522`
+- The dependency chain was then removed on `2026-04-04 13:37` America/Edmonton because it was wasting idle `gpu-l40s` capacity:
+  - cancelled placeholder descendants:
+    - `5501`, `5502`, `5503`, `5504`, `5505`, `5506`
+    - `5508`, `5509`, `5510`, `5512`, `5513`, `5514`
+    - `5516`, `5517`, `5518`, `5520`, `5521`, `5522`
+  - replacement independent real-only jobs:
+    - seed `7`: `5523` (`50`), `5525` (`100`), `5527` (`200`)
+    - seed `13`: `5529` (`50`), `5531` (`100`), `5533` (`200`)
+    - seed `29`: `5535` (`50`), `5537` (`100`), `5539` (`200`)
+  - replacement independent CAVER jobs:
+    - seed `7`: `5524` (`50`), `5526` (`100`), `5528` (`200`)
+    - seed `13`: `5530` (`50`), `5532` (`100`), `5534` (`200`)
+    - seed `29`: `5536` (`50`), `5538` (`100`), `5540` (`200`)
+  - copied launch settings:
+    - real-only experiment name: `stage0_real_only_budget_native_horizon`
+    - CAVER experiment name: `stage0_caver_budget_native_horizon`
+    - CAVER selector: `fitted_stage0_value_softmax_v1`
+    - CAVER admission: `success_lcb_v1`
+    - CAVER value-proxy model: `/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_chunk_success_logreg_v2.json`
+  - health check after relaunch:
+    - `5523`, `5524`, `5527`, and `5528` all reached `connected to policy server`, `starting LIBERO evaluation: mode=manifest`, and `max_steps=400`
+    - no port-collision regression reappeared on the parallel grid
+  - live queue snapshot checked on `2026-04-04 13:39:02` America/Edmonton:
+    - running corrected `budget=25` jobs: `5499`, `5500`, `5507`, `5511`, `5515`, `5519`
+    - running corrected independent jobs: `5523`, `5524`, `5525`, `5526`, `5527`, `5528`, `5529`, `5530`, `5531`, `5532`, `5533`, `5534`, `5535`, `5536`, `5537`
+    - pending at that check: `5538`, `5539`, `5540`
+    - longest active upper-bound finish times from Slurm:
+      - `5528`: `2026-04-05 00:07:05` America/Edmonton
+      - `5534`: `2026-04-05 00:07:09` America/Edmonton
+  - Stage-E closure helper:
+    - script: `/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/summarize_stagee_grid.py`
+    - latest snapshot JSON: `/projects/p57098/euijin1/Caver/logs/runtime/stagee_native_horizon_grid_snapshot.json`
+    - latest snapshot Markdown table: `/projects/p57098/euijin1/Caver/logs/runtime/stagee_native_horizon_grid_snapshot.md`
+- On `2026-04-04 19:36:55` America/Edmonton, Stage E added a postprocess-resume path so native-horizon failures can be salvaged from existing rollout outputs:
+  - patched:
+    - `scripts/stagee/run_stage0_real_only_round.sh`
+    - `scripts/stagee/run_stage0_caver_round.sh`
+    - `scripts/stagee/build_caver_round_artifacts.py`
+    - `scripts/stagee/caver_heuristic.py`
+  - new behavior:
+    - `--skip-online` reuses `*_online_eval.json`, `*_online_contexts.jsonl`, and `*_online_chunks.jsonl`
+    - CAVER artifact building now streams giant trace JSONLs instead of loading them fully into RAM
+  - resumed failed cells:
+    - real-only `budget=50`: `5564` (seed `7`), `5566` (seed `13`), `5568` (seed `29`)
+    - CAVER `budget=50`: `5563` (seed `7`), `5567` (seed `13`), `5569` (seed `29`)
+    - CAVER `budget=100`: `5571` (seed `7`), `5570` (seed `13`)
+  - proof of fix:
+    - `5564` is already writing shard outputs under the original failed run directory `.../real_only_round_demo.manifest_shards/`
+    - `5563` is running the old OOM section at `MaxRSS=9364984K` by `sstat`, far below the previous `128G` failure mode
+- On `2026-04-05 01:07` America/Edmonton, the Stage-E salvage backend itself was repaired for the no-checkpoint training path:
+  - `scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh` now writes `training_completed.marker` and `training_completed.json` on success
+  - `scripts/stagee/run_stage0_real_only_round.sh` and `scripts/stagee/run_stage0_caver_round.sh` now count either `replay_buffer_0.pkl` or the marker as a completed backend update
+  - `scripts/stagee/summarize_stagee_grid.py` now backfills `training_completed=true` when the marker exists
+  - the completed salvage pair `5576` and `5577` are now authoritative proofs that the repaired no-checkpoint backend path is healthy:
+    - `5576` real-only seed `7`, budget `100`: `COMPLETED` on `2026-04-05 00:56:45` America/Edmonton, log reached `train_embodied_agent: runner.run completed`
+    - `5577` CAVER seed `7`, budget `50`: `COMPLETED` on `2026-04-05 00:56:02` America/Edmonton, log reached `train_embodied_agent: runner.run completed`
+  - backfilled markers were written into those original result directories so the Stage-E grid snapshot now reports them as completed backend updates
+  - a direct-`sbatch` submission bug was found and fixed in the same wave:
+    - `5578` through `5584` failed immediately because Slurm staged the runner scripts under `/var/spool/slurmd/...`, which broke their relative `source ../common.sh`
+    - the corrected resume wave `5591` through `5597` now invokes `/bin/bash /uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/...` and is running cleanly
+  - active repaired resume wave:
+    - real-only `budget=100`: `5591` seed `13`, `5592` seed `29`
+    - CAVER `budget=50`: `5593` seed `13`, `5594` seed `29`
+    - CAVER `budget=100`: `5595` seed `7`, `5596` seed `13`, `5597` seed `29`
+    - all seven are now `RUNNING` and have moved beyond the prior launch failure point
+  - active full reruns for previously incomplete `budget=200` cells:
+    - real-only: `5585`, `5586`, `5587`
+    - CAVER: `5588`, `5589`, `5590`
+    - all six are `RUNNING` on the native-horizon path, and `5588` has already completed its first context with `success=True`
+- Rechecked on `2026-04-05 07:34` America/Edmonton:
+  - completed repaired resumes:
+    - `5591`, `5592`, `5593`, `5594`, `5597`
+  - remaining repaired CAVER `budget=100` retries:
+    - `5595` failed because the Ray owner node died unexpectedly
+    - `5596` timed out after reaching backend training
+    - both were immediately resubmitted with safer settings as `5598` and `5599` (`04:00:00`, exclude `l40s-04`)
+    - `5598` and `5599` are already running cleanly through RLinf startup
+  - live `budget=200` jobs remain the main risk:
+    - `5585` through `5590` are all still `RUNNING`
+    - `5585` and `5588` were at context `135/200` during the last log check
+    - best-effort attempt to extend their live walltime from `10:00:00` to `12:00:00` failed with `Access/permission denied`, so the current account cannot modify active job limits
+- Rechecked on `2026-04-05 21:29` America/Edmonton:
+  - `/projects/p57098/euijin1/Caver` is writable again, so the temporary Stage-E `budget=200` continuation recovery path was formalized in-repo:
+    - `scripts/stagee/finalize_stagee_budget200_cell.py`
+    - `scripts/slurm/submit_stagee_budget200_finalize.sh`
+  - validation passed:
+    - `python -m py_compile scripts/stagee/finalize_stagee_budget200_cell.py`
+    - `bash -n scripts/slurm/submit_stagee_budget200_finalize.sh`
+  - finalized Stage-E run dirs now live physically under `/rdss/p57098/euijin1/caver/stagee_budget200_finalized/` and are surfaced back into `/projects/p57098/euijin1/Caver/runs/` as symlinked run directories so the existing Stage-E grid summarizer will treat them as the latest cells
+  - live finalize wave:
+    - `5612` real-only seed `13`, budget `200`
+    - `5613` CAVER seed `13`, budget `200`
+    - `5614` real-only seed `29`, budget `200`
+    - `5615` real-only seed `7`, budget `200`
+    - `5616` CAVER seed `7`, budget `200`
+    - `5617` CAVER seed `29`, budget `200`
+  - proof the repaired finalize path is healthy:
+    - `5612` and `5613` are already deep into the merged-prefix trace write on `l40s-01`
+    - `5615`, `5616`, and `5617` are already writing nonzero merged traces on `l40s-03`
+    - this recovery wave is using `CAVER_DEFAULT_RUNTIME_LOG_ROOT=/rdss/p57098/euijin1/caver/runtime_logs`, so it does not depend on the previously full `/projects/.../logs/runtime` path
+- Rechecked on `2026-04-05 21:44` America/Edmonton:
+  - the first finalize probe wave `5612` through `5617` was cancelled after `~6–7` minutes each
+  - reason:
+    - those processes had already entered the old materialized-merge path, and the observed copy throughput was too low to trust for a `budget=200` closeout
+  - the finalized recovery helper now defaults to `trace_reference_mode=manifest`
+    - no up-front giant merged JSONL copy
+    - `scripts/stage0/convert_stage0_trace_to_rlinf_demo.py` and `scripts/stagee/build_caver_round_artifacts.py` were patched to consume the new trace-source manifest format directly
+    - helper stderr now logs prefix-scan progress (`recovered prefix context ...`) so long scans are monitorable
+  - authoritative live wave:
+    - `5618` real-only seed `13`
+    - `5619` CAVER seed `13`
+    - `5620` real-only seed `7`
+    - `5621` real-only seed `29`
+    - `5622` CAVER seed `7`
+    - `5623` CAVER seed `29`
+  - all six were resubmitted with `--time 12:00:00`, `--exclude l40s-04`, and `/rdss/p57098/euijin1/caver/runtime_logs`
+  - immediate proof of life:
+    - `5618` and `5619` stderr both show `start mode=manifest ...` followed by `recovered prefix context 1/...`
+  - rechecked on `2026-04-06 10:29` America/Edmonton:
+    - grid snapshot is now `24/25` completed cells
+    - `5625` closed the failed `5618` real-only seed-`13`, `budget=200` cell via pure `--skip-online` retry on `l40s-03`
+    - authoritative result for that cell:
+      - `200` contexts
+      - `70` successes
+      - success rate `0.35`
+      - `12778` demo items
+      - `63751` primitive steps
+      - backend training completed
+    - only one Stage E cell remains live:
+      - `5626` CAVER seed `29`, `budget=200`
+      - still `RUNNING` on `l40s-03`
+      - parser-fix proof: no repeat of the earlier JSON decode failure, and `sstat` shows `MaxRSS=7577568K`
+      - current best finish estimate from analogous completed CAVER finalize jobs is `2026-04-06 15:40` to `16:05` America/Edmonton
+  - final closeout on `2026-04-06 14:37` America/Edmonton:
+    - `5626` completed, so the Stage E native-horizon comparison grid is now fully complete
+    - current proxy-stage result is:
+      - CAVER matches or slightly exceeds real-only online success, but does not clearly beat it
+      - strongest effect is data efficiency: roughly `0.19x` to `0.22x` as many admitted demo items as real-only at matched budgets
+    - this is not yet enough to call the project publishable as a methods paper under the proposal threshold:
+      - proposal threshold is defined on held-out real-task success at `N=100`
+      - Stage E has not yet run full non-smoke post-training evaluation on held-out LIBERO contexts/tasks
+      - the current backend invocations still use smoke-scale training settings (`max_steps=1`, `max_epochs=1`)
+    - recommendation:
+      - do not let Stage F PiPER transfer become the main line of work yet
+      - first convert Stage E from `online collection + smoke backend` into a proper `train then held-out evaluate` comparison at `N=100`
+      - only if CAVER still fails to produce a held-out gap after that should selector/admission retuning resume
+
+## Main risks to track from the start
+
+- GE-Sim integration may be the longest dependency path. Keep the contingency provider interface alive, but do not switch early.
+- WoVR/RLinf may be infeasible on SDRE without a supported non-Docker deployment path.
+- Proposal setup commands assume `conda`, `uv`, and Docker; SDRE currently points toward modules plus `venv`.
+- The `SCRATCH` variable is stale in this shell and should not be used until a real scratch mount is confirmed.
+- One `gpu-l40s` node advertises only `3x L40S`, so multi-GPU assumptions on that partition must stay conservative.
+
+## Current Frontier
+
+- Reopened Stage E on `2026-04-06` for the publishability-critical follow-up:
+  - the native-horizon online grid is complete, but it is not enough for a strong paper claim because it still reflects `online collection + smoke backend`
+  - the active next step is a real `train -> checkpoint export -> held-out LIBERO eval` comparison at `N=100` before any serious Stage F PiPER push
+- New post-train pipeline added:
+  - `scripts/pistepnft/run_stage0_demo_training.sh`
+  - `scripts/openpi/export_rlinf_actor_checkpoint_to_pytorch.py`
+  - `scripts/openpi/export_rlinf_actor_checkpoint_to_pytorch.sh`
+  - `scripts/stagee/run_stage0_posttrain_from_round.sh`
+  - `scripts/slurm/submit_stage0_posttrain_from_round.sh`
+- First paired held-out jobs:
+  - `5656` = CAVER, seed `7`, `budget=100`
+  - `5657` = real-only, seed `7`, `budget=100`
+  - both reuse the authoritative Stage E `budget=100` round outputs as demo data sources and write heavy artifacts under `/rdss/p57098/euijin1/caver/stagee_posttrain/...`
+- Immediate issue and fix:
+  - first wave `5654` and `5655` failed because Hydra required additive dataset overrides
+  - corrected by changing the offline demo overrides in `scripts/pistepnft/run_stage0_demo_training.sh` to `+data.type` and `+data.path`
+- Rechecked on `2026-04-06 21:25` America/Edmonton:
+  - both authoritative jobs are `RUNNING` on `l40s-01`
+  - both have passed the old Hydra failure point
+  - CAVER job `5656` is already in real RLinf training and has reached `Global Step 3/40`
+  - next hard gates are:
+    - checkpoint creation
+    - RLinf actor export to OpenPI-style checkpoint
+    - held-out `T_val_S0` / `T_test_S0` evaluation
+- Decision:
+  - do not move the main project effort to PiPER yet
+  - keep the center of gravity on simulation until this held-out post-train comparison lands
+- Rechecked on `2026-04-06 21:41` America/Edmonton:
+  - the held-out `N=100` follow-up is now clearly on the right path, but it required one more exporter repair
+  - what failed:
+    - `5656` and `5657` both finished offline RLinf training and wrote `global_step_40` actor checkpoints
+    - both then failed while exporting the checkpoint to an OpenPI-style directory on `/rdss`
+    - root cause was filesystem metadata handling in the exporter, first on `config.json` and then on nested `assets/`
+  - what was fixed:
+    - `scripts/openpi/export_rlinf_actor_checkpoint_to_pytorch.py`
+      - replaced metadata-preserving copies with symlink-first export for `config.json` and `assets/`
+    - `scripts/slurm/submit_stage0_posttrain_from_round.sh`
+      - now supports `--skip-train`, `--skip-export`, and `--skip-eval` for cheap salvage
+  - cheap salvage chain:
+    - `5658` / `5659` were the first resume probes and confirmed the second asset-copy failure mode
+    - `5660` / `5661` are the authoritative fixed resume jobs
+  - current proof of health:
+    - both `5660` and `5661` are `RUNNING`
+    - both have already exported successfully with summary files showing:
+      - `base_key_count=812`
+      - `exported_key_count=812`
+      - `missing_base_key_count=0`
+    - both are already in the held-out evaluation phase behind the OpenPI policy server
+- Closed on `2026-04-07 00:38` America/Edmonton:
+  - first held-out `N=100` post-train comparison is complete for seed `7`
+  - result:
+    - CAVER:
+      - `T_val_S0 = 22 / 100 = 0.22`
+      - `T_test_S0 = 22 / 100 = 0.22`
+    - real-only:
+      - `T_val_S0 = 20 / 100 = 0.20`
+      - `T_test_S0 = 20 / 100 = 0.20`
+  - online source rounds at the same `N=100` were tied (`0.40` vs `0.40`), so this is the first actual held-out gain for CAVER on the current pipeline
+  - efficiency context on that same seed-budget cell:
+    - CAVER demo items: `1338`
+    - real-only demo items: `6057`
+    - CAVER uses `0.221x` as much admitted demo data
+  - interpretation:
+    - this is directionally encouraging and materially better than the earlier purely online proxy result
+    - it is still not enough to justify shifting the project to PiPER as the main effort:
+      - only one seed is complete
+      - the absolute held-out success level remains modest
+  - current best next step:
+    - keep Stage E as the main line
+    - run the same held-out `N=100` post-train comparison on seeds `13` and `29`
+    - if the `+0.02` held-out gap repeats, then we have a defensible basis for broader simulation claims before PiPER transfer
+    - if it does not repeat, improve the post-train schedule before expanding further
+- Reopened on `2026-04-07 01:32` America/Edmonton:
+  - the held-out replication wave for seeds `13` and `29` is now live from the authoritative Stage E `budget=100` rounds
+  - launched jobs:
+    - `5670` CAVER, seed `13`
+    - `5671` real-only, seed `13`
+    - `5672` CAVER, seed `29`
+    - `5673` real-only, seed `29`
+  - first issue:
+    - `5672` failed on `l40s-01` after `00:00:32`
+    - failure signature was Ray `ChannelWorker` aborts followed by shell-level exit `139`
+    - the other three jobs started cleanly, so this looked node-specific rather than a new pipeline regression
+  - fix and validation:
+    - `scripts/slurm/submit_stage0_posttrain_from_round.sh`
+      - now supports `--exclude NODES`
+    - syntax recheck:
+      - `bash -n scripts/slurm/submit_stage0_posttrain_from_round.sh`
+  - rerun:
+    - `5674` resubmits the failed CAVER seed-`29` held-out cell with `--exclude=l40s-01`
+    - repeated polls through `2026-04-07 01:32` show it running on `l40s-08`, past the old crash window, with live Ray attach / RLinf placement logs and fresh RDSS tensorboard output
+  - current live set:
+    - `5670`, `5671`, `5673`, `5674`
+  - current interpretation:
+    - the held-out replication grid is still on track
+    - the immediate blocker was a node-local instability on `l40s-01`, not a new systemic training/export/eval bug
+- Reworked on `2026-04-07 01:40` America/Edmonton:
+  - the first seed-`13/29` replication wave exposed a broader concurrency problem in the post-train path
+  - what failed:
+    - `5672` and `5674` showed that concurrent jobs on the same node could still attach to each other's local Ray clusters when RLinf used `ray.init(address="auto")`
+    - after fixing that, `5677` still died on `l40s-01` because the node already held two other post-train jobs and Ray worker threads failed to spawn (`Resource temporarily unavailable`)
+  - what was fixed:
+    - `third_party/src/pi-StepNFT/rlinf/scheduler/cluster/cluster.py`
+      - new `CAVER_RLINF_FORCE_LOCAL_RAY` path skips `address="auto"` and starts an isolated local Ray runtime
+      - local Ray now receives an explicit `_temp_dir` from the job temp root
+    - `scripts/pistepnft/run_stage0_demo_training.sh`
+      - now enables `CAVER_RLINF_FORCE_LOCAL_RAY=1` by default
+  - validation:
+    - `py_compile` passed for the RLinf cluster patch
+    - `bash -n` passed for the stage-0 demo training wrapper
+  - contaminated jobs were cancelled and relaunched as:
+    - `5675` CAVER seed `13`
+    - `5676` real-only seed `13`
+    - `5677` CAVER seed `29`
+    - `5678` real-only seed `29`
+    - all with `save_interval=40`
+  - proof the Ray-isolation fix holds:
+    - `5675`, `5676`, and `5678` now log `Started a local Ray instance.` rather than `Connecting to existing Ray cluster`
+    - they have all progressed into genuine RLinf training, so the shared-cluster bug is no longer the limiting factor
+  - final targeted rerun:
+    - `5679` replaces failed `5677`
+    - submitted with `--exclude=l40s-01,l40s-08` to avoid the oversubscribed nodes that triggered the thread-creation failure
+    - state at the latest check: `PENDING (Resources)`
+  - current live frontier:
+    - `5675`, `5676`, `5678`, `5679`
+- Closed on `2026-04-07 14:52` America/Edmonton:
+  - the three-seed held-out `N=100` post-train comparison is now complete
+  - completed jobs:
+    - `5675` CAVER seed `13`
+    - `5676` real-only seed `13`
+    - `5678` real-only seed `29`
+    - `5679` CAVER seed `29`
+  - aggregate held-out results across seeds `{7,13,29}`:
+    - validation:
+      - CAVER `66 / 300 = 0.2200`
+      - real-only `63 / 300 = 0.2100`
+    - test:
+      - CAVER `66 / 300 = 0.2200`
+      - real-only `61 / 300 = 0.2033`
+    - test wins / ties / losses by seed:
+      - `2 / 1 / 0`
+  - data-efficiency context on those same three cells:
+    - CAVER admitted demo items: `3922`
+    - real-only admitted demo items: `18054`
+    - ratio: `0.217x`
+  - current interpretation:
+    - this is now a stable three-seed simulation result, not a single encouraging seed
+    - CAVER is no longer just matching online rollout behavior; it is showing a consistent held-out post-train edge while using much less admitted data
+    - that is strong enough to justify Stage F transfer work on PiPER
+    - however, the absolute held-out success level remains modest (`~0.22`), so additional simulation optimization is still warranted if the paper goal is a strong raw-performance claim rather than a sample-efficiency claim
+
+## Proposal-alignment recovery plan
+
+- decision after the completed Stage-E simulation readout:
+  - proceed with PiPER only after reopening the simulation method path long enough to reduce the largest proposal-implementation gaps
+  - the current result is publishable as a sample-efficiency story, but it is not yet the literal proposal mainline
+- remaining mainline gaps:
+  - StepNFT-style executed-sample backend is not yet the active Stage-E post-train path
+  - lagged DR pseudo-outcomes are not yet implemented
+  - lagged calibrator refits are not yet implemented
+  - mainline frozen-provider features are not yet the active selector input
+- execution order for the recovery pass:
+  - 1. exact-backend enablement
+    - add offline NFT rollout-batch support to RLinf
+    - teach Stage-E artifact conversion to emit those rollout batches
+  - 2. selection/admission correction
+    - implement candidate-level DR pseudo-outcomes
+    - implement lagged calibrator fitting and roundwise utility refresh
+  - 3. provider decision
+    - either integrate GE-Sim as the actual simulation provider
+    - or explicitly switch to the contingency provider and record that choice honestly in the writeup
+  - 4. simulation rerun
+    - rerun held-out `N=100` across seeds `{7,13,29}`
+    - only if that aligned path is competitive should the broader rerun or PiPER transfer become the main line
+- active work now:
+  - exact-backend enablement has started
+  - first concrete implementation slice:
+    - patch the RLinf launcher, runner, and actor path so offline NFT training can consume rollout-shaped admitted data instead of the current SAC-only replay-demo path
+- current progress on that slice:
+  - landed:
+    - `third_party/src/pi-StepNFT/rlinf/data/offline_rollout_batch.py`
+    - `third_party/src/pi-StepNFT/rlinf/data/datasets/__init__.py`
+    - `third_party/src/pi-StepNFT/examples/embodiment/train_embodied_agent.py`
+    - `third_party/src/pi-StepNFT/rlinf/runners/embodied_runner.py`
+    - `third_party/src/pi-StepNFT/rlinf/workers/actor/fsdp_actor_worker.py`
+  - effect:
+    - offline RLinf launch is no longer structurally limited to `embodied_sac`
+    - NFT actor training can now receive rollout-shaped offline payloads, which is a prerequisite for exact StepNFT-style admitted-data updates
+  - validation:
+    - `py_compile` passed
+    - rollout-batch load/split smoke passed in the train environment
+  - additional progress:
+    - the bridge/policy-server path now has an opt-in RLinf exact-payload mode:
+      - `scripts/bridge/openpi_policy_server.py`
+      - `scripts/bridge/run_libero_remote_eval.sh`
+      - `scripts/bridge/openpi_client_smoke.py`
+      - `scripts/bridge/run_exact_payload_smoke.sh`
+    - this mode bypasses the thin action-only OpenPI `Policy` and serves the RLinf OpenPI model directly
+    - exact mode returns rollout-side tensors over websocket, including:
+      - `prev_logprobs`
+      - `prev_values`
+      - `forward_inputs`
+    - when run with `flow_sde` and exact `train` inference mode, `forward_inputs` now contains the required `nft_*` tensors
+  - validation:
+    - `py_compile` passed for the bridge/server patch
+    - `bash -n` passed for the bridge runner and exact smoke wrapper
+    - direct GPU smoke passed for the RLinf exact loader
+    - end-to-end websocket smoke passed and confirmed `forward_inputs` includes:
+      - `nft_xt`
+      - `nft_v`
+      - `nft_xnext`
+      - `nft_step_index`
+      - `nft_noise_level`
+  - next active task:
+    - teach Stage-E artifact conversion to emit those rollout-shaped NFT batches from admitted traces
+  - additional progress:
+    - Stage-E exact-trace conversion is now landed:
+      - `scripts/stagee/convert_stagee_trace_to_offline_rollout_batch.py`
+      - `scripts/stagee/convert_stagee_trace_to_offline_rollout_batch.sh`
+    - emitted batch contract:
+      - chunk-level offline rollout batch for RLinf `embodied_rollout_batch`
+      - exact rollout tensors preserved per executed query:
+        - `prev_logprobs`
+        - `nft_xt`
+        - `nft_v`
+        - `nft_xnext`
+        - `nft_step_index`
+        - `nft_noise_level`
+      - padded context trajectory tensors:
+        - `rewards`
+        - `dones`
+        - `terminations`
+        - `truncations`
+        - `success_once`
+        - `loss_mask`
+        - `loss_mask_sum`
+    - validation:
+      - `py_compile` passed for the converter
+      - `bash -n` passed for the wrapper
+      - synthetic exact-trace smoke passed:
+        - `logs/runtime/exact_offline_rollout_batch_smoke/exact_trace_smoke.jsonl`
+        - `logs/runtime/exact_offline_rollout_batch_smoke/exact_rollout_batch_smoke.pt`
+        - `logs/runtime/exact_offline_rollout_batch_smoke/exact_rollout_batch_smoke.summary.json`
+      - RLinf offline loader / split smoke passed on the converted batch
+      - RLinf `terminal-binary` advantage computation passed on the converted batch
+  - next active task:
+    - replace the current Stage-E demo-only SAC post-train path with the exact offline NFT rollout-batch path and run the first exact post-train smoke
+  - additional progress:
+    - the Stage-E post-train wrapper now supports an exact backend:
+      - `scripts/stagee/run_stage0_posttrain_from_round.sh --train-backend exact_offline_nft`
+      - `scripts/pistepnft/run_stage0_demo_training.sh` now accepts generic dataset input via `--data-path` and `--data-type`
+    - the RLinf exact offline NFT bring-up path is now validated on a synthetic admitted-trace smoke:
+      - authoritative artifact root:
+        - `/rdss/p57098/euijin1/caver/exact_posttrain_wrapper_smoke_v2/artifacts_live`
+      - converted rollout batch:
+        - `/rdss/p57098/euijin1/caver/exact_posttrain_wrapper_smoke_v2/artifacts_live/posttrain_exact_rollout_batch.pt`
+      - training completion marker:
+        - `/rdss/p57098/euijin1/caver/exact_posttrain_wrapper_smoke_v2/artifacts_live/posttrain_train/training_completed.marker`
+      - checkpoint root:
+        - `/rdss/p57098/euijin1/caver/exact_posttrain_wrapper_smoke_v2/artifacts_live/posttrain_train/stage0_posttrain_caver/checkpoints/global_step_1/actor`
+    - exact offline bring-up fixes landed:
+      - `pi0.5` NFT config defaults now reference `model/pi0_5`
+      - exact rollout conversion preserves full-horizon `nft_xt` / `nft_xnext` and chunk-horizon `nft_v`
+      - actor worker rollout-size inference now supports exact offline batches without `prev_logprobs`
+      - actor worker exposes `recv_offline_rollout_batch()` and computes terminal-binary `advantages` / `returns` on offline batches before training
+      - NFT checkpoint save creates its output directory explicitly before writing the reference model artifacts
+    - storage note:
+      - the same smoke failed on `/projects` because exact NFT reference checkpoints are very large and exhausted the project mount during `resume_signature.pt` save
+      - the `/rdss` rerun completed, so all future exact post-train runs should keep heavy artifacts on `/rdss`
+  - next active task:
+    - rerun the Stage-E held-out `budget=100` post-train comparison with the exact offline NFT backend on real admitted traces, starting from the existing seed set `{7, 13, 29}`
+  - additional progress:
+    - the first exact post-train reruns on the old Stage-E `budget=100` rounds failed for the right reason:
+      - the existing `budget=100` round traces predated exact collection and do not contain `selected_policy_aux.forward_inputs`
+      - exact offline NFT conversion therefore cannot consume them
+    - the runner stack now supports exact Stage-E online collection directly:
+      - `scripts/stagee/run_stage0_real_only_round.sh`
+      - `scripts/stagee/run_stage0_caver_round.sh`
+      - `scripts/slurm/submit_stage0_real_only_round.sh`
+      - `scripts/slurm/submit_stage0_caver_round.sh`
+      - `scripts/slurm/submit_stage0_real_only_budget.sh`
+      - `scripts/slurm/submit_stage0_caver_budget.sh`
+    - new execution mode:
+      - `--server-mode openpi-exact`
+      - exact bridge flags now propagate from budget submitter -> round submitter -> round runner -> `run_libero_remote_eval.sh`
+    - RDSS support fixes:
+      - budget submitters now accept `--run-root` / `--log-root`
+      - round submitters no longer fail if `chmod +x` is rejected on `/rdss`
+  - validation:
+    - exact Stage-E smoke collection completed its online phase for both methods:
+      - `5735` real-only, seed `7`, `budget=5`
+      - `5736` CAVER, seed `7`, `budget=5`
+    - authoritative smoke artifact roots:
+      - `/rdss/p57098/euijin1/caver/stagee_exact_collection_runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget5__20260408T020817Z`
+      - `/rdss/p57098/euijin1/caver/stagee_exact_collection_runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260408T020817Z`
+    - direct JSONL inspection confirmed the new traces now carry:
+      - `selected_policy_aux.forward_inputs`
+      - `prev_logprobs`
+      - `nft_xt`
+      - `nft_v`
+      - `nft_xnext`
+      - `nft_step_index`
+      - `nft_noise_level`
+    - this is the exact payload contract required by `convert_stagee_trace_to_offline_rollout_batch.py`
+  - current live jobs:
+    - `5737` real-only, seed `7`, `budget=100`, exact collection rerun
+    - `5738` CAVER, seed `7`, `budget=100`, exact collection rerun
+    - both were submitted on `2026-04-07` with `12:00:00` walltime and `/rdss` run/log roots
+  - next active task:
+    - wait for `5737` / `5738` to finish
+    - then rerun exact offline NFT post-train on those newly collected exact traces
+  - additional progress:
+    - both exact seed-`7` collection reruns finished successfully:
+      - `5737` real-only, `COMPLETED`, `09:40:40`, `l40s-01`
+      - `5738` CAVER, `COMPLETED`, `11:49:06`, `l40s-03`
+    - exact payload integrity was rechecked on the completed artifacts:
+      - real-only source:
+        - `/rdss/p57098/euijin1/caver/stagee_exact_collection_runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget100__20260408T023812Z/results/real_only_online_chunks.jsonl`
+      - CAVER admitted source:
+        - `/rdss/p57098/euijin1/caver/stagee_exact_collection_runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget100__20260408T023812Z/results/caver_admitted_chunks.jsonl`
+      - both still contain the required exact rollout payload contract:
+        - `selected_policy_aux.forward_inputs`
+        - `prev_logprobs`
+        - `nft_xt`
+        - `nft_v`
+        - `nft_xnext`
+        - `nft_step_index`
+        - `nft_noise_level`
+  - current live jobs:
+    - `5747` CAVER seed-`7` exact post-train held-out rerun
+    - `5748` real-only seed-`7` exact post-train held-out rerun
+    - both were submitted on `2026-04-08` with:
+      - `--train-backend exact_offline_nft`
+      - `12:00:00` walltime
+      - `/rdss/p57098/euijin1/caver/stagee_posttrain_exact/...` artifact roots
+    - current startup verification:
+      - both jobs are `RUNNING`
+      - stdout confirms the correct exact path:
+        - rollout-batch conversion via `convert_stagee_trace_to_offline_rollout_batch.sh`
+        - NFT actor config `libero_goal_nft_actor_openpi_pi05`
+        - held-out evaluation targets `T_val_S0` and `T_test_S0`
+  - next active task:
+    - wait for `5747` / `5748` to complete
+    - compare held-out exact-backend results against the earlier SAC-fallback held-out numbers before deciding whether to replicate seeds `13` and `29`
+  - additional progress:
+    - both seed-`7` exact post-train jobs failed, but the failures are now localized to exact NFT training itself, not collection or conversion:
+      - `5747` CAVER:
+        - `FAILED`, `00:20:42`, `l40s-01`
+        - exact rollout-batch conversion succeeded
+        - training failed at `EmbodiedFSDPActor.run_training` with:
+          - `AssertionError: 2680 is not divisible by 16`
+      - `5748` real-only:
+        - `FAILED`, `01:43:33`, `l40s-01`
+        - exact rollout-batch conversion succeeded
+        - training reached `compute_nft_actor_loss` and then failed with:
+          - `RuntimeError: CUDA error: device-side assert triggered`
+          - loss site around `logit[mask_strong]`
+    - exact rollout-batch artifacts now exist for direct local debugging:
+      - CAVER:
+        - `/rdss/p57098/euijin1/caver/stagee_posttrain_exact/stagee__caver-round__manifest-t_train_s0-all__seed7__budget100__20260408T023812Z/posttrain_exact_rollout_batch.pt`
+      - real-only:
+        - `/rdss/p57098/euijin1/caver/stagee_posttrain_exact/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget100__20260408T023812Z/posttrain_exact_rollout_batch.pt`
+    - this changes the frontier:
+      - the collection side is working
+      - the next step is an exact NFT backend debug pass on these saved batches, not another cluster-scale rerun
+  - next active task:
+    - fix exact offline NFT training on the saved seed-`7` Stage-E rollout batches
+    - likely first fixes:
+      - pad / trim / rebatch offline rollout batches so rollout size divisibility assumptions hold
+      - harden `compute_nft_actor_loss` against the real terminal-binary label distributions produced by Stage-E exact batches
+  - follow-up progress on the exact backend debug:
+    - both planned fixes are now implemented and locally validated on the saved seed-`7` exact rollout batches:
+      - offline rollout-batch training trims the flattened tail when rollout size is not divisible by `batch_size_per_rank`
+      - `compute_nft_actor_loss` metrics no longer use the boolean-index reductions that triggered the earlier device-side assert
+    - the first rerun wave `5754` / `5755` was then cancelled on purpose because it was recomputing exact rollout batches from very large trace JSONLs even though those `.pt` batches already existed from `5747` / `5748`
+    - the post-train wrapper now supports:
+      - `--exact-rollout-batch-path PATH`
+      - this skips redundant exact-trace conversion and reuses an existing rollout batch directly
+    - the first reuse-based rerun wave `5756` / `5757` then exposed the next two exact-backend issues:
+      - `5756` real-only:
+        - the earlier device-side assert moved to an out-of-bounds exact-step indexing failure
+        - saved rollout batches contain `nft_step_index` values `{0,1,2,3,4}` while training still built the schedule from configured `num_steps=4`
+      - `5757` CAVER:
+        - failed on `NameError: name 'logging' is not defined` from the new trimmed-batch warning
+    - those were patched in `fsdp_actor_worker.py`:
+      - import `logging`
+      - infer effective exact NFT `num_steps` from the observed batch step indices when needed
+    - local validation on the saved real-only batch confirmed the same exact NFT loss now runs cleanly with inferred `num_steps=5`
+    - the current rerun wave is:
+      - `5790` CAVER
+      - `5791` real-only
+    - current status:
+      - both are still `RUNNING`
+      - both cleared the earlier 2-3 minute crash window
+      - both are still inside exact NFT training on `l40s-04`
+      - stderr now shows the new inferred-step warning repeatedly instead of the old immediate crashes
+  - additional exact backend progress:
+    - `5790` and `5791` both failed, but at a later and much narrower point:
+      - both completed `Global Step 1/20` of exact NFT training before failing
+      - that confirms the earlier `logging` bug and exact-step schedule bug are both fixed
+    - the new failure was a second-call batch mutation bug in `EmbodiedFSDPActor.run_training`:
+      - the method was overwriting `self.rollout_batch` with the flattened/shuffled train view
+      - on the next training call, it re-flattened an already-flat batch
+      - the special `[:-1]` handling for `dones`-family tensors then shortened the effective batch to `7999` / `2671`, causing the observed out-of-bounds indices
+    - fix now applied:
+      - `rlinf/workers/actor/fsdp_actor_worker.py`
+        - `run_training()` now keeps the raw rollout batch intact and uses a local `train_rollout_batch` for shuffle/trim/dataloader preparation
+      - `py_compile` passed
+    - seed-`7` exact rerun4 is now live from the same saved rollout batches:
+      - `5793` CAVER
+      - `5794` real-only
+      - artifact roots:
+        - `/rdss/p57098/euijin1/caver/stagee_posttrain_exact_rerun4/stagee__caver-round__manifest-t_train_s0-all__seed7__budget100__20260408T023812Z`
+        - `/rdss/p57098/euijin1/caver/stagee_posttrain_exact_rerun4/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget100__20260408T023812Z`
+    - next active task:
+      - poll `5793` / `5794` past the old `Global Step 1` failure point
+      - if they clear it, continue through export and held-out `T_val_S0` / `T_test_S0` evaluation for the exact backend
+  - additional live verification:
+    - rerun4 has now cleared the old exact-backend failure thresholds for both methods:
+      - `5793` CAVER is still running at `00:21:42` and has reached `Global Step 3/20`
+      - `5794` real-only is still running at `00:21:41` and has reached `Global Step 1/20`
+    - that is beyond the earlier crash times (`00:08:13` CAVER, `00:20:19` real-only)
+    - current conclusion:
+      - exact offline NFT post-train is no longer blocked on the batch-mutation / shuffle-prep correctness bug
+      - the remaining work is to let seed-`7` exact training finish, then export and run held-out `T_val_S0` / `T_test_S0`
+  - exact rerun4 outcome:
+    - `5793` CAVER completed the full exact seed-`7` pipeline:
+      - training complete
+      - export complete
+      - held-out `T_val_S0 = 21/100`
+      - held-out `T_test_S0 = 22/100`
+    - `5794` real-only timed out only because the single job tried to do training, export, validation, and test in one `08:00:00` slot:
+      - training complete
+      - export complete
+      - held-out `T_val_S0 = 24/100`
+      - `T_test_S0` started but did not finish before walltime
+    - so the exact comparison is no longer blocked by backend correctness; it is missing only the real-only test completion
+  - additional infrastructure support:
+    - post-train wrappers now support selective held-out recovery via:
+      - `--eval-partitions val,test`
+    - first recovery attempt `5823` failed immediately on a skip-train path mismatch
+    - that was patched so `--exact-rollout-batch-path` also satisfies the skip-train exact-batch existence check
+    - current live recovery:
+      - `5824` real-only exact held-out resume
+      - uses:
+        - `--skip-train`
+        - `--skip-export`
+        - `--eval-partitions test`
+      - purpose:
+        - finish only the missing seed-`7` exact `T_test_S0` result from the existing export
+  - seed-`7` exact held-out comparison is now complete:
+    - `5824` finished successfully and closed the missing real-only test partition
+    - final exact seed-`7` held-out results:
+      - CAVER:
+        - `T_val_S0 = 21/100 = 0.21`
+        - `T_test_S0 = 22/100 = 0.22`
+      - real-only:
+        - `T_val_S0 = 24/100 = 0.24`
+        - `T_test_S0 = 23/100 = 0.23`
+    - this means:
+      - exact offline NFT is now functioning end to end on real Stage-E traces
+      - but the first exact comparison does not reproduce the earlier SAC-fallback CAVER edge
+      - on seed `7`, the proposal-aligned exact backend slightly favors real-only
+  - next active task:
+    - treat seed `7` as a replication check, not a conclusion
+    - rerun the exact collection plus exact post-train held-out path on seeds `13` and `29` at `budget=100`
+    - only then decide whether the exact proposal-aligned backend helps or hurts CAVER relative to the simpler SAC-fallback result
+  - exact replication wave is now live:
+    - `5828` real-only, seed `13`, `budget=100`
+    - `5829` CAVER, seed `13`, `budget=100`
+    - `5826` real-only, seed `29`, `budget=100`
+    - `5827` CAVER, seed `29`, `budget=100`
+    - all four were submitted on `2026-04-09` with:
+      - `--server-mode openpi-exact`
+      - `--exact-rollout-payload`
+      - `12:00:00` walltime
+      - `/rdss` run/log roots
+    - startup verification:
+      - all four are already `RUNNING`
+      - startup logs confirm they are on the exact bridge path rather than the older native OpenPI serving path
+  - exact seed-`13/29` collection replication is now complete:
+    - `5828` real-only seed `13`: `40/100` online successes
+    - `5829` CAVER seed `13`: `39/100` online successes, `39` admitted contexts
+    - `5826` real-only seed `29`: `40/100` online successes
+    - `5827` CAVER seed `29`: `39/100` online successes, `39` admitted contexts
+    - exact payload integrity recheck passed on all four completed traces
+  - exact seed-`13/29` post-train replication wave is now live:
+    - `5836` real-only seed `13`
+    - `5837` CAVER seed `13`
+    - `5838` real-only seed `29`
+    - `5839` CAVER seed `29`
+    - all four were submitted on `2026-04-10` with:
+      - `--train-backend exact_offline_nft`
+      - `16:00:00` walltime
+      - `/rdss/p57098/euijin1/caver/stagee_posttrain_exact_replication/...` artifact roots
+    - current startup verification:
+      - all four are `RUNNING`
+      - logs confirm exact rollout-batch conversion plus NFT actor training on the new replicated traces
+  - exact post-train replication update:
+    - completed exact CAVER replications:
+      - seed `13`: `T_val_S0 = 21/100`, `T_test_S0 = 26/100`
+      - seed `29`: `T_val_S0 = 22/100`, `T_test_S0 = 25/100`
+    - exact CAVER aggregate across seeds `{7,13,29}`:
+      - validation `64/300 = 0.2133`
+      - test `73/300 = 0.2433`
+    - the real-only exact side did not complete cleanly on the first replication pass:
+      - `5836` seed `13`: `TIMEOUT` on `l40s-01`
+      - `5838` seed `29`: `FAILED` on `l40s-01` with the known Ray thread-creation abort signature
+    - so the best next step was an exact real-only salvage rerun from the already materialized rollout batches, not another full trace conversion pass
+  - current live salvage wave:
+    - `5856` real-only seed `13`
+    - `5855` real-only seed `29`
+    - both were submitted on `2026-04-11` with:
+      - `--exclude l40s-01`
+      - `--exact-rollout-batch-path .../posttrain_exact_rollout_batch.pt`
+      - new artifact roots under `/rdss/p57098/euijin1/caver/stagee_posttrain_exact_replication_rerun/...`
+    - current verification:
+      - both are `RUNNING` on `l40s-03`
+      - both are already writing TensorBoard event files from training
+  - exact held-out replication is now complete across all three seeds:
+    - salvage reruns succeeded:
+      - seed `13` real-only: `T_val_S0 = 25/100`, `T_test_S0 = 25/100`
+      - seed `29` real-only: `T_val_S0 = 21/100`, `T_test_S0 = 22/100`
+    - final exact three-seed held-out aggregates:
+      - CAVER:
+        - validation `64/300 = 0.2133`
+        - test `73/300 = 0.2433`
+      - real-only:
+        - validation `70/300 = 0.2333`
+        - test `70/300 = 0.2333`
+    - exact-backend interpretation:
+      - on held-out test, CAVER still has a small aggregate edge (`+0.0100`)
+      - on held-out validation, real-only is better (`+0.0200`)
+      - so the proposal-aligned exact backend result is mixed, not cleanly stronger than the earlier SAC-fallback comparison
+  - current best read:
+    - keep the earlier SAC-fallback three-seed held-out result as the cleaner Stage-E headline for sample-efficiency positioning
+    - treat the exact-backend result as an important alignment check / ablation showing that the proposal-faithful backend is viable, but not yet clearly better end to end
+
+## Current priority reset
+
+- decision on `2026-04-12`:
+  - do not make PiPER the main scientific line yet
+  - Stage E regains priority until the proposal-critical selector/admission gaps are narrowed
+- reason:
+  - the current simulation story is already publishable as a sample-efficiency result
+  - but the implementation is still missing the proposal-mainline roundwise DR refresh path
+  - Stage F explicitly assumes that selector logic, DR correction, calibrator fitting, and the executed-sample backend are already stable before transfer
+
+- active implementation order:
+  - 1. Stage-E DR artifact path
+    - export candidate-level DR pseudo-outcome datasets from completed Stage-E rounds
+  - 2. lagged calibrator path
+    - fit a reusable utility-calibrator artifact from those DR datasets
+    - expose corrected mean/scale to the online selector
+  - 3. true roundwise lag
+    - make later Stage-E rounds load the previously fitted calibrator rather than the fixed Stage-0 proxy
+  - 4. proposal rerun
+    - rerun held-out `N=100` seeds `{7,13,29}` on the aligned path
+  - 5. only then:
+    - resume PiPER as the primary execution stage
+
+- progress on `2026-04-12`:
+  - steps 1 and 2 are now landed locally in the codebase:
+    - Stage-E rounds can emit a candidate-level DR dataset
+    - Stage-E rounds can fit a lagged calibrator artifact from that dataset
+    - the online selector can load that lagged calibrator and score candidates with corrected mean/scale
+  - remaining highest-priority gap:
+    - the round driver still needs to become truly lagged so later rounds load the calibrator produced by earlier rounds instead of running the whole budget cell in one pass
+
+- additional progress on `2026-04-12`:
+  - the true lagged round driver is now landed:
+    - [run_stage0_caver_lagged_budget.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_caver_lagged_budget.py)
+  - the GE-Sim bring-up is now partially landed at the provider-interface level:
+    - pinned checkout prepared at [Genie-Envisioner](/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/Genie-Envisioner)
+    - Python `3.10` venv prepared at [gesim](/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/venvs/gesim)
+    - new LIBERO-to-GE-Sim bundle writer landed at [libero_gesim_provider.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/libero_gesim_provider.py)
+    - [libero_remote_eval.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/bridge/libero_remote_eval.py) can now emit per-candidate GE-Sim-style bundles from LIBERO contexts
+    - local smoke succeeded on `.tmp/gesim_bundle_smoke` with:
+      - `actions.npy` shape `4 x 16`
+      - `exec_actions.npy` shape `4 x 7`
+      - `head`, `hand_left`, and `hand_right` image histories plus intrinsics/extrinsics
+    - the first runtime install blocker was resolved into an SDRE-specific inference profile:
+      - [bootstrap_component.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/env/bootstrap_component.sh) now supports `gesim --profile sdre-infer`
+      - relaxed profile requirements live in [gesim_sdre_infer.txt](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/env/requirements/gesim_sdre_infer.txt)
+      - local GE-Sim inference preprocessing was patched to avoid OpenCV source builds:
+        - [infer_gesim.py](/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/Genie-Envisioner/gesim_video_gen_examples/infer_gesim.py)
+        - [get_traj_maps.py](/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/Genie-Envisioner/utils/get_traj_maps.py)
+      - `bootstrap_component.sh gesim --skip-clone --profile sdre-infer` now completes successfully on SDRE
+      - import smoke of the released GE-Sim inference script now succeeds under `torch 2.6.0`
+      - bundle preprocessing smoke also succeeds on `.tmp/gesim_bundle_smoke`
+      - dedicated runtime helpers now exist:
+        - [with_gesim_infer.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/env/with_gesim_infer.sh)
+        - [prepare_gesim_runtime.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/prepare_gesim_runtime.py)
+        - [run_gesim_inference.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/run_gesim_inference.sh)
+      - the released GE-Sim checkpoint is now cached and verified locally:
+        - [ge_sim_cosmos_v0.1.safetensors](/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/model-cache/gesim/ge_sim_cosmos_v0.1.safetensors)
+        - size `3938231616`
+        - sha256 `0e49bbe4e83c2b6e380e0e2215f8f257ac760498b772b20e52f37a40b6649f8d`
+      - the runtime helper now fails cleanly with a status report when assets are incomplete instead of falling through to a vague model-load error
+      - the helper can now also read the local token file automatically from `/uhome/euijin1/.config/huggingface_token`
+      - current authoritative access result:
+        - Hugging Face token file is present and usable for API access
+        - download still fails with `GatedRepoError` because the linked account is not authorized for `nvidia/Cosmos-Predict2-2B-Video2World`
+        - structured status report: [gesim_runtime_status.json](/uhome/euijin1/projects/p57098/euijin1/Caver/.tmp/gesim_runtime_access_check/gesim_runtime_status.json)
+      - a second authorized token file now works:
+        - `/uhome/euijin1/.config/huggingface_token_nvidia`
+      - the full required Cosmos subset is now staged under:
+        - [Cosmos-Predict2-2B-Video2World](/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/model-cache/gesim/Cosmos-Predict2-2B-Video2World)
+      - ready-status report and rendered runtime config now exist:
+        - [gesim_runtime_status.json](/uhome/euijin1/projects/p57098/euijin1/Caver/.tmp/gesim_runtime_ready/gesim_runtime_status.json)
+        - [gesim_runtime.yaml](/uhome/euijin1/projects/p57098/euijin1/Caver/.tmp/gesim_runtime_ready/gesim_runtime.yaml)
+      - first actual GPU smoke chain:
+        - `5857`: failed after `00:00:45` because rendered GE-Sim custom class paths were still relative
+        - fix:
+          - [prepare_gesim_runtime.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/prepare_gesim_runtime.py) now rewrites those custom class paths to absolute source-file paths under the pinned checkout
+        - `5858`: passed model load and generation, then failed after `00:00:45` because `torchvision.io.write_video(...)` required PyAV
+        - fix:
+          - [utils/__init__.py](/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/Genie-Envisioner/utils/__init__.py) now falls back to `video.gif` and `video.pt` when PyAV is unavailable
+        - `5859`: authoritative successful GE-Sim smoke
+          - run dir `/projects/p57098/euijin1/Caver/runs/stagee__gesim-infer__libero-bundle-smoke__seed0__budget2__20260412T121638Z`
+          - state `COMPLETED`, elapsed `00:00:30`, node `l40s-01`
+          - artifacts:
+            - `gesim_runtime.yaml`
+            - `gesim_runtime_status.json`
+            - `video.gif`
+            - `video.pt`
+      - this is the first confirmed end-to-end GE-Sim execution on SDRE from a Stage-E LIBERO-exported bundle
+      - no equivalent ModelScope mirror for the required Cosmos scheduler / tokenizer / text-encoder / VAE asset set has been identified from the upstream GE-Sim instructions
+  - updated alignment read:
+    - verification-layer alignment is now substantially better:
+      - exact propensity logging: yes
+      - DR pseudo-outcomes for all safe candidates: yes
+      - lagged calibrator with mean/scale refresh: yes
+      - true roundwise lag: yes
+    - main remaining proposal gap is now clearly concentrated in the provider:
+      - the active Stage-E simulation path still does **not** use frozen GE-Sim outputs inside selector scoring, even though GE-Sim inference itself now works
+      - the missing pieces are now explicit:
+        - batch GE-Sim execution over candidate bundles at round scale
+        - future-summary feature extraction into the selector path
+      - so the current stack is still a contingency-provider implementation of the verification layer, not the full pinned mainline
+
+## 2026-04-12 Provider Progress
+
+- the provider status above is now superseded by the latest integration work:
+  - Stage E now has an active `gesim_live_summary` path inside the live LIBERO evaluator
+  - GE-Sim summaries now feed both:
+    - selector-side candidate scoring
+    - DR-dataset feature construction used for the next lagged calibrator
+- integrated live-provider smoke completed:
+  - job `5861`
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-gesim-live-smoke__libero-goal-task-0__seed7__budget2__20260412T124303Z`
+  - state `COMPLETED`, elapsed `00:02:11`, node `l40s-01`
+  - outputs included:
+    - live provider bundles
+    - GE-Sim runtime status files
+    - per-candidate provider summaries
+    - selector / admission artifacts
+    - Stage-E DR dataset
+    - lagged DR calibrator
+- one additional method-side gap was found and fixed immediately after `5861`:
+  - the DR dataset builder had been recomputing candidate metrics without `candidate_provider_aux`
+  - fixed in:
+    - [build_stagee_dr_dataset.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/build_stagee_dr_dataset.py)
+    - [caver_heuristic.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/caver_heuristic.py)
+  - validation on the rebuilt smoke dataset confirmed provider-aware `base_feature_vector` dimension `41`
+- Stage-E launchers were then upgraded so proposal-aligned jobs can be submitted directly:
+  - [submit_stage0_caver_round.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_round.sh)
+  - [submit_stage0_caver_budget.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_budget.sh)
+  - new submitter coverage includes:
+    - `--dr-calibrator-model-path`
+    - `--provider-mode`
+    - `--provider-bundle-root`
+    - `--provider-gesim-timeout-sec`
+    - `--provider-gesim-prompt`
+    - `--num-steps-wait`
+    - `--replan-steps`
+- first multi-family provider pilot now running:
+  - job `5862`
+  - submission time: `2026-04-12 06:52:12` America/Edmonton
+  - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260412T125212Z`
+  - requested walltime / ETA upper bound:
+    - `04:00:00`
+    - no later than `2026-04-12 10:52:12` America/Edmonton unless requeued
+  - current observed progress:
+    - manifest evaluation started on `5` contexts
+    - first context entered successfully
+    - provider bundles exist for all four first-query candidates
+    - GE-Sim runtime status files already exist inside those first-query inference roots
+- immediate next step remains unchanged:
+  - if `5862` completes cleanly, promote to a provider-aware `budget=25` seed-`7` round
+  - then use the same provider-aware path in the lagged multi-round budget driver
+
+- update after the provider pilot completed:
+  - `5862` timed out after `04:00:22`
+  - it was not a proposal-valid GE-Sim-provider run because every candidate GE-Sim call failed with `torch.OutOfMemoryError`
+  - root cause:
+    - OpenPI native serving and GE-Sim were sharing one `L40S` GPU
+  - direct evidence from the trace:
+    - `663` runtime-status files
+    - `0` provider-summary files
+    - all inspected candidate payloads reported `inference_status=error`, `returncode=1`, and CUDA OOM during model load
+
+- corrective patch and validation now completed:
+  - runtime wrappers now honor split GPU routing for OpenPI vs GE-Sim
+  - Stage-E runner auto-configures that routing when provider mode is active and multiple GPUs are visible
+  - authoritative validation job:
+    - `5863`
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__libero_goal-task-0__seed7__budget1__20260412T201432Z`
+    - resources: `2 x l40s`
+    - state: `COMPLETED`
+    - elapsed: `00:04:57`
+  - exact provider result from `5863`:
+    - `8` candidate GE-Sim inferences completed successfully
+    - `8` provider summaries present in the trace payloads
+    - full Stage-E artifact path completed afterward
+
+- updated execution decision on `2026-04-12`:
+  - do not immediately scale to a larger live-provider budget cell yet
+  - the correctness blocker is fixed, but the throughput model is still wrong:
+    - GE-Sim is still launched as a fresh subprocess for each candidate
+    - that is now the main reason proposal-scale provider runs remain impractical
+  - next best step:
+    - implement a persistent GE-Sim inferencer / worker process and route live provider requests through it
+
+- update later on `2026-04-12` after that implementation:
+  - the persistent GE-Sim path is now implemented:
+    - [gesim_persistent_worker.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/gesim_persistent_worker.py)
+    - [prepare_gesim_runtime_once.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/prepare_gesim_runtime_once.sh)
+    - [libero_remote_eval.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/bridge/libero_remote_eval.py) now defaults live-provider execution to `persistent_worker`
+  - authoritative validation:
+    - job `5864`
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__libero_goal-task-0__seed7__budget1__20260412T210225Z`
+    - final state: `COMPLETED`
+    - Slurm elapsed: `00:01:46`
+    - evaluator duration: `74.66 s`
+    - exact provider result:
+      - `8/8` candidate GE-Sim calls completed successfully
+      - `8/8` provider summaries were present
+      - results recorded `provider_gesim_execution_mode = persistent_worker`
+  - measured impact relative to the earlier OOM-fix validation `5863`:
+    - prior walltime: `00:04:57`
+    - new walltime: `00:01:46`
+    - reduction: about `64.3%`
+    - speedup: about `2.8x`
+  - execution decision now:
+    - the main remaining blocker is no longer live-provider startup overhead
+    - the next best step is to rerun the balanced multi-family provider-aware pilot at `budget=5`, then promote to the provider-aware `budget=25` seed-`7` round if that pilot is clean
+
+- further update on `2026-04-12` while rerunning that provider-aware `budget=5` pilot:
+  - `5865` proved the speedup path but exposed a host-memory leak over long request sequences
+  - `5866` proved the host-memory fix but exposed a storage-pressure problem on `/projects`
+  - `5867` completed end to end after moving provider bundles to `/rdss`, but exposed a final `/rdss` permission bug in `shutil.copy2(...)`
+  - those three follow-up fixes are now in place:
+    - bounded worker RSS via per-request trimming
+    - summary-only provider outputs by default
+    - `/rdss` bundle-root support with plain content copies instead of `copy2`
+  - current authoritative live validation is `5868`:
+    - run dir: `/projects/p57098/euijin1/Caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260412T234327Z`
+    - provider bundle root: `/rdss/p57098/euijin1/caver/provider_bundles/stagee__caver-round__manifest-t_train_s0-all__seed7__budget5__20260412T234327Z`
+    - final state: `COMPLETED`
+    - elapsed: `00:47:43`
+    - online result: `2/5` successes with `404` chunk traces
+    - downstream selector / admission / demo / DR / lagged-calibrator / backend artifacts all completed
+  - decision:
+    - the live GE-Sim provider path is now operational in the proposal-relevant configuration
+    - the next step is no longer more provider-path debugging; it is promotion from `budget=5` to the provider-aware `budget=25` seed-`7` round
+    - for proposal-scale cells, prefer `/rdss` for provider bundles and full run artifacts so `/projects` does not become the limiting factor
+
+- promotion step now executed:
+  - job `5872` is the provider-aware `budget=25`, seed-`7` Stage-E round
+  - it is running from `/rdss`:
+    - run dir: `/rdss/p57098/euijin1/caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260413T022431Z`
+    - Slurm logs: `/rdss/p57098/euijin1/caver/logs/slurm/...-5872.{out,err}`
+    - provider bundle root: `/rdss/p57098/euijin1/caver/provider_bundles/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260413T022430Z`
+  - scheduler state at launch check:
+    - `RUNNING` on `l40s-01`
+    - walltime upper bound: `2026-04-13 01:54:31` America/Edmonton
+
+- update after the provider-aware `budget=25` round completed:
+  - `5872` finished `COMPLETED` on `2026-04-13 00:14:03` America/Edmonton
+  - run dir:
+    - `/rdss/p57098/euijin1/caver/runs/stagee__caver-round__manifest-t_train_s0-all__seed7__budget25__20260413T022431Z`
+  - online result:
+    - `25` contexts
+    - `10/25` successes
+    - `0.400` success rate
+    - `1932` chunk traces
+  - method artifact result:
+    - DR dataset written with `7728` candidate records
+    - lagged calibrator fit completed with validation weighted RMSE about `0.2224`
+  - remaining blocker:
+    - admission still rejected all `25` contexts
+    - so the provider-aware single-round path is stable, but it still did not generate admitted backend data
+  - conclusion:
+    - the next informative run is not another single-round repeat
+    - the next informative run is an explicit lagged multi-round cell that actually consumes the fitted calibrator in the next round
+
+- one Slurm / RDSS submitter issue was also fixed on `2026-04-13`:
+  - [submit_experiment.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_experiment.sh) no longer hard-fails when `chmod +x` is denied on RDSS-created files
+  - reason:
+    - `sbatch` only needs read access to the job script
+    - RDSS maps new files to an owner that allows write but not `chmod`, so the old behavior was an unnecessary submission failure
+
+- first true lagged-refresh validation is now running:
+  - job `5873`
+  - submission time: `2026-04-13 03:27:20` America/Edmonton
+  - current scheduler state:
+    - `RUNNING` on `l40s-01`
+    - walltime upper bound: `2026-04-13 13:27:20` America/Edmonton
+  - run dir:
+    - `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260413T092720Z`
+  - Slurm logs:
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260413T092720Z-5873.out`
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260413T092720Z-5873.err`
+  - experimental structure:
+    - total budget `50`
+    - round size `25`
+    - round `1` seeded by the calibrator from `5872`
+    - round `2` uses the newly refreshed calibrator from round `1`
+    - finalization happens once on the merged lagged cell
+  - why this matters:
+    - this is the first Stage-E run that actually matches the proposal’s GE-Sim mainline provider -> DR -> lagged calibrator -> refreshed selector chain

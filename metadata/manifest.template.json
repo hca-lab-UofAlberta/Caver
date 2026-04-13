@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "id": "",
+    "created_at_utc": "",
+    "status": "created"
+  },
+  "study": {
+    "stage": "",
+    "method": "",
+    "task": "",
+    "seed": null,
+    "budget": null
+  },
+  "cluster": {
+    "site": "SDRE",
+    "account": "p57098",
+    "partition": "",
+    "qos": "",
+    "gpu_type": "",
+    "gpus": null,
+    "cpus_per_task": null,
+    "memory": "",
+    "time_limit": ""
+  },
+  "code": {
+    "repo_root": "",
+    "git_commit": "",
+    "git_branch": ""
+  },
+  "paths": {
+    "run_dir": "",
+    "job_script": "",
+    "slurm_stdout": "",
+    "slurm_stderr": ""
+  },
+  "slurm": {
+    "job_name": "",
+    "job_id": "",
+    "submission_host": "",
+    "submission_user": ""
+  },
+  "components": {
+    "openpi": {
+      "ref": "fdc03f527881cdfc8ae1a168ed6a20c60edbbbcc"
+    },
+    "gesim": {
+      "ref": "0e0de7e2ed8ea04e6ba41d47c93964ae65e5fbd2"
+    },
+    "pi_step_nft": {
+      "ref": "140eece2ef7e8574c34c69a221fd4e3f56c2423c"
+    },
+    "rlinf": {
+      "ref": "e62de7767f41a61d58eb15d916e8809c70610672"
+    },
+    "libero": {
+      "ref": ""
+    }
+  },
+  "data": {
+    "template_partitions": {
+      "seed": "",
+      "train": "",
+      "val": "",
+      "test": ""
+    }
+  },
+  "seeds": {
+    "policy_sampling": null,
+    "selector_sampling": null,
+    "backend_sampling": null,
+    "bootstrap_mask": null
+  },
+  "notes": []
+}
+

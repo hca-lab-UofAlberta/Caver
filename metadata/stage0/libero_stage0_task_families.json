@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "name": "caver_stage0_libero_task_families",
+  "description": "Five semantic Stage-0 proxy families for CAVER on stock LIBERO-90.",
+  "notes": [
+    "Stock LIBERO tasks expose 50 init-state templates each on this installation.",
+    "The proposal requires disjoint Stage-0 seed, train, val, and test partitions with 24 seed contexts, 20 val contexts, and 20 test contexts per semantic task family.",
+    "To satisfy those counts without overlap, each semantic family is backed by three concrete LIBERO-90 tasks."
+  ],
+  "families": [
+    {
+      "family_id": "block_to_tray_proxy",
+      "proposal_task": "block-to-tray",
+      "proxy_label": "pick-to-tray",
+      "substitution_note": "Stock LIBERO does not expose a literal block-to-tray benchmark family with enough templates. These three LIBERO-90 single-object pick-to-tray tasks are the closest reproducible proxy.",
+      "members": [
+        {
+          "suite": "libero_90",
+          "task_index": 57,
+          "task_name": "LIVING_ROOM_SCENE3_pick_up_the_cream_cheese_and_put_it_in_the_tray"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 58,
+          "task_name": "LIVING_ROOM_SCENE3_pick_up_the_ketchup_and_put_it_in_the_tray"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 59,
+          "task_name": "LIVING_ROOM_SCENE3_pick_up_the_tomato_sauce_and_put_it_in_the_tray"
+        }
+      ]
+    },
+    {
+      "family_id": "container_insertion_proxy",
+      "proposal_task": "can-to-bowl",
+      "proxy_label": "object-to-container",
+      "substitution_note": "Stock LIBERO does not expose enough can-into-bowl templates to support disjoint 24/20/20 Stage-0 splits. These three LIBERO-90 object-into-basket tasks are the nearest high-volume receptacle-placement proxy.",
+      "members": [
+        {
+          "suite": "libero_90",
+          "task_index": 46,
+          "task_name": "LIVING_ROOM_SCENE1_pick_up_the_alphabet_soup_and_put_it_in_the_basket"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 47,
+          "task_name": "LIVING_ROOM_SCENE1_pick_up_the_cream_cheese_box_and_put_it_in_the_basket"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 48,
+          "task_name": "LIVING_ROOM_SCENE1_pick_up_the_ketchup_and_put_it_in_the_basket"
+        }
+      ]
+    },
+    {
+      "family_id": "two_object_stack_proxy",
+      "proposal_task": "two-block stack",
+      "proxy_label": "two-object stack",
+      "substitution_note": "Stock LIBERO stacking tasks use bowls rather than blocks. They are still the closest available two-object stacking family in the benchmark.",
+      "members": [
+        {
+          "suite": "libero_90",
+          "task_index": 16,
+          "task_name": "KITCHEN_SCENE2_stack_the_black_bowl_at_the_front_on_the_black_bowl_in_the_middle"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 17,
+          "task_name": "KITCHEN_SCENE2_stack_the_middle_black_bowl_on_the_back_black_bowl"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 63,
+          "task_name": "LIVING_ROOM_SCENE4_stack_the_left_bowl_on_the_right_bowl_and_place_them_in_the_tray"
+        }
+      ]
+    },
+    {
+      "family_id": "relocate_to_region_proxy",
+      "proposal_task": "relocate-to-region",
+      "proxy_label": "place-to-compartment",
+      "substitution_note": "Stock LIBERO does not expose a named marked-region benchmark. These caddy-compartment placement tasks are the nearest stable place-into-goal-region proxy.",
+      "members": [
+        {
+          "suite": "libero_90",
+          "task_index": 73,
+          "task_name": "STUDY_SCENE1_pick_up_the_book_and_place_it_in_the_front_compartment_of_the_caddy"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 74,
+          "task_name": "STUDY_SCENE1_pick_up_the_book_and_place_it_in_the_left_compartment_of_the_caddy"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 75,
+          "task_name": "STUDY_SCENE1_pick_up_the_book_and_place_it_in_the_right_compartment_of_the_caddy"
+        }
+      ]
+    },
+    {
+      "family_id": "drawer_open_proxy",
+      "proposal_task": "drawer-or-handle-open",
+      "proxy_label": "drawer-open",
+      "substitution_note": "These three LIBERO-90 tasks are direct drawer-open tasks and therefore the cleanest Stage-0 proxy family.",
+      "members": [
+        {
+          "suite": "libero_90",
+          "task_index": 6,
+          "task_name": "KITCHEN_SCENE1_open_the_bottom_drawer_of_the_cabinet"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 7,
+          "task_name": "KITCHEN_SCENE1_open_the_top_drawer_of_the_cabinet"
+        },
+        {
+          "suite": "libero_90",
+          "task_index": 11,
+          "task_name": "KITCHEN_SCENE2_open_the_top_drawer_of_the_cabinet"
+        }
+      ]
+    }
+  ]
+}
