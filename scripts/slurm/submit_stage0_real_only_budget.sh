@@ -58,7 +58,7 @@ Backend options:
   --eval-envs COUNT          Eval env count (default: 1)
   --runner-max-steps COUNT   RLinf runner max_steps (default: 1)
   --runner-max-epochs COUNT  RLinf runner max_epochs (default: 1)
-  --rollout-steps COUNT      RLinf env rollout-step setting (default: 5)
+  --rollout-steps COUNT      RLinf env rollout-step setting (default: 4)
   --micro-batch COUNT        RLinf actor micro batch size (default: 1)
   --global-batch COUNT       RLinf actor global batch size (default: 2)
   --replay-capacity COUNT    Replay buffer capacity (default: 512)
@@ -118,7 +118,7 @@ train_envs="1"
 eval_envs="1"
 runner_max_steps="1"
 runner_max_epochs="1"
-rollout_steps="5"
+rollout_steps="4"
 micro_batch="1"
 global_batch="2"
 replay_capacity="512"

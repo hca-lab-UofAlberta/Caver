@@ -26,7 +26,7 @@ Slurm options:
 
 Pipeline options:
   --method NAME              real_only or caver (default: auto)
-  --train-backend NAME       sac_demo or exact_offline_nft (default: sac_demo)
+  --train-backend NAME       sac_demo or exact_offline_nft (default: exact_offline_nft)
   --config-name NAME         RLinf config name (default: libero_goal_ppo_openpi_pi05)
   --policy-config NAME       OpenPI serve config name (default: pi05_libero)
   --base-model-path PATH     Base OpenPI PyTorch checkpoint dir
@@ -41,6 +41,7 @@ Pipeline options:
   --min-buffer-size COUNT    Demo buffer gate (default: 256)
   --train-actor-steps COUNT  Actor gate (default: 256)
   --update-epoch COUNT       RLinf update_epoch (default: 1)
+  --rollout-steps COUNT      RLinf train/eval rollout horizon (default: 4)
   --exact-rollout-batch-path PATH
                              Reuse an existing exact rollout batch .pt and skip trace conversion
   --manifest-path PATH       Stage-0 manifest (default: metadata/stage0/libero_stage0_partitions.json)
@@ -51,6 +52,7 @@ Pipeline options:
   --eval-seed COUNT          Held-out eval seed (default: 7)
   --eval-max-contexts COUNT  Optional cap for each held-out partition
   --max-env-steps COUNT      Optional rollout horizon override
+  --replan-steps COUNT       Held-out executed chunk horizon (default: 4)
   --libero-gl-backend NAME   egl or osmesa (default: osmesa)
   --skip-train              Reuse existing training outputs
   --skip-export             Reuse existing exported checkpoint
@@ -72,7 +74,7 @@ cpus="8"
 mem="128G"
 
 method=""
-train_backend="sac_demo"
+train_backend="exact_offline_nft"
 config_name="libero_goal_ppo_openpi_pi05"
 policy_config="pi05_libero"
 base_model_path="/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch"
@@ -87,6 +89,7 @@ global_batch="16"
 min_buffer_size="256"
 train_actor_steps="256"
 update_epoch="1"
+rollout_steps="4"
 exact_rollout_batch_path=""
 manifest_path="${CAVER_REPO_ROOT}/metadata/stage0/libero_stage0_partitions.json"
 val_partition="T_val_S0"
@@ -96,6 +99,7 @@ family_ids=""
 eval_seed="7"
 eval_max_contexts=""
 max_env_steps=""
+replan_steps="4"
 libero_gl_backend="osmesa"
 skip_train=0
 skip_export=0
@@ -130,6 +134,7 @@ while (($# > 0)); do
     --min-buffer-size) min_buffer_size="${2:?missing value for --min-buffer-size}"; shift 2 ;;
     --train-actor-steps) train_actor_steps="${2:?missing value for --train-actor-steps}"; shift 2 ;;
     --update-epoch) update_epoch="${2:?missing value for --update-epoch}"; shift 2 ;;
+    --rollout-steps) rollout_steps="${2:?missing value for --rollout-steps}"; shift 2 ;;
     --exact-rollout-batch-path) exact_rollout_batch_path="${2:?missing value for --exact-rollout-batch-path}"; shift 2 ;;
     --manifest-path) manifest_path="${2:?missing value for --manifest-path}"; shift 2 ;;
     --val-partition) val_partition="${2:?missing value for --val-partition}"; shift 2 ;;
@@ -139,6 +144,7 @@ while (($# > 0)); do
     --eval-seed) eval_seed="${2:?missing value for --eval-seed}"; shift 2 ;;
     --eval-max-contexts) eval_max_contexts="${2:?missing value for --eval-max-contexts}"; shift 2 ;;
     --max-env-steps) max_env_steps="${2:?missing value for --max-env-steps}"; shift 2 ;;
+    --replan-steps) replan_steps="${2:?missing value for --replan-steps}"; shift 2 ;;
     --libero-gl-backend) libero_gl_backend="${2:?missing value for --libero-gl-backend}"; shift 2 ;;
     --skip-train) skip_train=1; shift ;;
     --skip-export) skip_export=1; shift ;;
@@ -256,6 +262,7 @@ cmd+=(
     --min-buffer-size "${min_buffer_size}" \
     --train-actor-steps "${train_actor_steps}" \
     --update-epoch "${update_epoch}" \
+    --rollout-steps "${rollout_steps}" \
     ${exact_rollout_batch_path:+--exact-rollout-batch-path "${exact_rollout_batch_path}"} \
     --manifest-path "${manifest_path}" \
     --val-partition "${val_partition}" \
@@ -265,6 +272,7 @@ cmd+=(
     --eval-seed "${eval_seed}" \
     ${eval_max_contexts:+--eval-max-contexts "${eval_max_contexts}"} \
     ${max_env_steps:+--max-env-steps "${max_env_steps}"} \
+    --replan-steps "${replan_steps}" \
     "${resume_args[@]}" \
     --libero-gl-backend "${libero_gl_backend}")"
 )

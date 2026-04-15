@@ -1,0 +1,157 @@
+{
+  "batch_size": 256,
+  "best_epoch": 23,
+  "best_train_metrics": {
+    "count": 6578.0,
+    "mean_pre_scale": 0.011860495313547478,
+    "target_mean": 0.27715655210025686,
+    "weighted_mae": 0.0832787808972757,
+    "weighted_mse": 0.017126312448920166,
+    "weighted_rmse": 0.13086753779650692
+  },
+  "best_val_metrics": {
+    "count": 1878.0,
+    "mean_pre_scale": 0.01285234613981595,
+    "target_mean": 0.2688638730649594,
+    "weighted_mae": 0.17580779866705182,
+    "weighted_mse": 0.06526157589628974,
+    "weighted_rmse": 0.2554634531518936
+  },
+  "bootstrap_keep_probability": 0.8,
+  "class_weight_positive": 8.0,
+  "dataset_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_seed_context_success_dataset.jsonl",
+  "epochs_completed": 28,
+  "epochs_requested": 30,
+  "feature_spec": {
+    "base_feature_dim": 38,
+    "family_ids": [
+      "block_to_tray_proxy",
+      "container_insertion_proxy",
+      "drawer_open_proxy",
+      "relocate_to_region_proxy",
+      "two_object_stack_proxy"
+    ],
+    "feature_dim": 44,
+    "include_base_progress_interaction": false,
+    "include_base_progress_sq_interaction": false,
+    "include_family_one_hot": true,
+    "include_family_progress_interaction": false,
+    "include_family_progress_sq_interaction": false,
+    "include_policy_query_index": true,
+    "include_policy_query_index_sq": false,
+    "policy_query_index_scale": 79.0
+  },
+  "hidden_dim": 256,
+  "history_tail": [
+    {
+      "epoch": 19.0,
+      "train_mae": 0.09440194990178608,
+      "train_pre_scale": 0.011505824175208838,
+      "train_rmse": 0.14364829545216126,
+      "val_mae": 0.18035302536721384,
+      "val_mse": 0.06678331167611164,
+      "val_pre_scale": 0.01151625308096313,
+      "val_rmse": 0.25842467311793516
+    },
+    {
+      "epoch": 20.0,
+      "train_mae": 0.08853379850598164,
+      "train_pre_scale": 0.016254965063868997,
+      "train_rmse": 0.13886060331424632,
+      "val_mae": 0.18104097678673908,
+      "val_mse": 0.0685690834577183,
+      "val_pre_scale": 0.01590372848905525,
+      "val_rmse": 0.26185699046945127
+    },
+    {
+      "epoch": 21.0,
+      "train_mae": 0.09674553427486042,
+      "train_pre_scale": 0.014353493079187348,
+      "train_rmse": 0.14388587824281718,
+      "val_mae": 0.1880411637529273,
+      "val_mse": 0.07711940786783722,
+      "val_pre_scale": 0.014640191734557773,
+      "val_rmse": 0.2777038132036311
+    },
+    {
+      "epoch": 22.0,
+      "train_mae": 0.08459016850289276,
+      "train_pre_scale": 0.01275821197016964,
+      "train_rmse": 0.1308564609306791,
+      "val_mae": 0.17906261336654575,
+      "val_mse": 0.06921346050449038,
+      "val_pre_scale": 0.013671062125278688,
+      "val_rmse": 0.2630845120954299
+    },
+    {
+      "epoch": 23.0,
+      "train_mae": 0.0832787808972757,
+      "train_pre_scale": 0.011860495313547478,
+      "train_rmse": 0.13086753779650692,
+      "val_mae": 0.17580779866705182,
+      "val_mse": 0.06526157589628974,
+      "val_pre_scale": 0.01285234613981595,
+      "val_rmse": 0.2554634531518936
+    },
+    {
+      "epoch": 24.0,
+      "train_mae": 0.0808050129467353,
+      "train_pre_scale": 0.010229923867935488,
+      "train_rmse": 0.12454504010752714,
+      "val_mae": 0.1828728612540748,
+      "val_mse": 0.07235521737197619,
+      "val_pre_scale": 0.0106062714521748,
+      "val_rmse": 0.2689892514060296
+    },
+    {
+      "epoch": 25.0,
+      "train_mae": 0.0772656916984106,
+      "train_pre_scale": 0.01117694118989118,
+      "train_rmse": 0.12330771544455274,
+      "val_mae": 0.17620906936024816,
+      "val_mse": 0.06955964294580413,
+      "val_pre_scale": 0.011571541425084826,
+      "val_rmse": 0.2637416215651298
+    },
+    {
+      "epoch": 26.0,
+      "train_mae": 0.08078714639994292,
+      "train_pre_scale": 0.01181002996943935,
+      "train_rmse": 0.1244338249748309,
+      "val_mae": 0.1813100265283434,
+      "val_mse": 0.06996242862309647,
+      "val_pre_scale": 0.012067318541264919,
+      "val_rmse": 0.2645041183480826
+    },
+    {
+      "epoch": 27.0,
+      "train_mae": 0.07003249445642204,
+      "train_pre_scale": 0.009728714001903335,
+      "train_rmse": 0.11389258775186208,
+      "val_mae": 0.1702618249253736,
+      "val_mse": 0.06701752821735057,
+      "val_pre_scale": 0.010578304274070844,
+      "val_rmse": 0.25887743860242163
+    },
+    {
+      "epoch": 28.0,
+      "train_mae": 0.06987954144960722,
+      "train_pre_scale": 0.010575374429169039,
+      "train_rmse": 0.11205292584026318,
+      "val_mae": 0.18030970253898987,
+      "val_mse": 0.0716521732807023,
+      "val_pre_scale": 0.011054434476217517,
+      "val_rmse": 0.26767923580416597
+    }
+  ],
+  "label_key": "context_success_label",
+  "learning_rate": 0.001,
+  "output_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_mlp3head_v2.json",
+  "raw_positive_class_weight": 11.175436993441776,
+  "summary_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_context_success_progress_sq_mlp3head_v2.summary.json",
+  "target_mode": "context_success_progress_sq_v1",
+  "train_examples": 6578,
+  "val_examples": 1878,
+  "weight_decay": 0.0001,
+  "workflow": "train_stage0_value_proxy_mlp_v2"
+}

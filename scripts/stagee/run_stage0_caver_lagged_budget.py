@@ -325,7 +325,7 @@ def main(argv: list[str]) -> int:
             "dr_calibrator_model_path": initial_dr_calibrator_model_path_str,
             "dr_calibrator_model_id": initial_dr_calibrator_model_id,
             "num_steps_wait": int(runner_options.get("--num-steps-wait", "10")),
-            "replan_steps": int(runner_options.get("--replan-steps", "5")),
+            "replan_steps": int(runner_options.get("--replan-steps", "4")),
             "resize_size": int(runner_options.get("--resize-size", "224")),
             "resolution": int(runner_options.get("--resolution", "256")),
             "max_steps_override": (

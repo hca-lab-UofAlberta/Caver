@@ -28,6 +28,7 @@ Options:
   --save-interval COUNT      Runner save interval (default: 20)
   --val-check-interval COUNT Runner validation interval (default: -1)
   --rollout-steps COUNT      Train/eval max rollout steps (default: 5)
+  --action-chunk COUNT       Override actor.model.num_action_chunks / openpi.action_chunk
   --micro-batch COUNT        Actor micro batch size (default: 4)
   --global-batch COUNT       Actor global batch size (default: 16)
   --replay-capacity COUNT    Replay buffer capacity (default: 512)
@@ -58,6 +59,7 @@ max_epochs="20"
 save_interval="20"
 val_check_interval="-1"
 rollout_steps="5"
+action_chunk=""
 micro_batch="4"
 global_batch="16"
 replay_capacity="512"
@@ -87,6 +89,7 @@ while (($# > 0)); do
     --save-interval) save_interval="${2:?missing value for --save-interval}"; shift 2 ;;
     --val-check-interval) val_check_interval="${2:?missing value for --val-check-interval}"; shift 2 ;;
     --rollout-steps) rollout_steps="${2:?missing value for --rollout-steps}"; shift 2 ;;
+    --action-chunk) action_chunk="${2:?missing value for --action-chunk}"; shift 2 ;;
     --micro-batch) micro_batch="${2:?missing value for --micro-batch}"; shift 2 ;;
     --global-batch) global_batch="${2:?missing value for --global-batch}"; shift 2 ;;
     --replay-capacity) replay_capacity="${2:?missing value for --replay-capacity}"; shift 2 ;;
@@ -134,7 +137,7 @@ if [ ! -f "${config_path}" ]; then
   exit 1
 fi
 
-num_action_chunks="$(python3 - "${config_path}" <<'PY'
+config_num_action_chunks="$(python3 - "${config_path}" <<'PY'
 import pathlib
 import re
 import sys
@@ -144,8 +147,9 @@ match = re.search(r"^\s*num_action_chunks:\s*(\d+)\s*$", text, flags=re.MULTILIN
 print(match.group(1) if match else "")
 PY
 )"
-if [ -n "${num_action_chunks}" ] && [ $(( rollout_steps % num_action_chunks )) -ne 0 ]; then
-  echo "error: rollout-steps ${rollout_steps} must be divisible by actor.model.num_action_chunks=${num_action_chunks} for ${config_name}" >&2
+effective_action_chunk="${action_chunk:-${config_num_action_chunks}}"
+if [ -n "${effective_action_chunk}" ] && [ $(( rollout_steps % effective_action_chunk )) -ne 0 ]; then
+  echo "error: rollout-steps ${rollout_steps} must be divisible by actor.model.num_action_chunks=${effective_action_chunk} for ${config_name}" >&2
   exit 1
 fi
 
@@ -185,6 +189,8 @@ cmd=(
   "actor.global_batch_size=${global_batch}"
   "actor.micro_batch_size=${micro_batch}"
   "actor.model.model_path=${model_path}"
+  "actor.model.num_action_chunks=${effective_action_chunk}"
+  "actor.model.openpi.action_chunk=${effective_action_chunk}"
   "actor.model.openpi.solver_type=flow_sde"
   "+actor.model.openpi.pytorch_compile_mode=null"
   "rollout.model.model_path=${model_path}"

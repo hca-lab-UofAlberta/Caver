@@ -23,6 +23,7 @@ Options:
   --max-steps COUNT          Runner max_steps (default: 1)
   --max-epochs COUNT         Runner max_epochs cap (default: 1)
   --rollout-steps COUNT      Train/eval max rollout steps (default: 16)
+  --action-chunk COUNT       Override actor.model.num_action_chunks / openpi.action_chunk
   --micro-batch COUNT        Actor micro batch size (default: 2)
   --global-batch COUNT       Actor global batch size (default: 4)
   --replay-capacity COUNT    Replay buffer capacity (default: 512)
@@ -46,6 +47,7 @@ eval_envs="1"
 max_steps="1"
 max_epochs="1"
 rollout_steps="5"
+action_chunk=""
 micro_batch="1"
 global_batch="2"
 replay_capacity="512"
@@ -102,6 +104,10 @@ while (($# > 0)); do
       ;;
     --rollout-steps)
       rollout_steps="${2:?missing value for --rollout-steps}"
+      shift 2
+      ;;
+    --action-chunk)
+      action_chunk="${2:?missing value for --action-chunk}"
       shift 2
       ;;
     --micro-batch)
@@ -166,7 +172,7 @@ if [ ! -f "${config_path}" ]; then
   exit 1
 fi
 
-num_action_chunks="$(python3 - "${config_path}" <<'PY'
+config_num_action_chunks="$(python3 - "${config_path}" <<'PY'
 import pathlib
 import re
 import sys
@@ -176,8 +182,9 @@ match = re.search(r"^\s*num_action_chunks:\s*(\d+)\s*$", text, flags=re.MULTILIN
 print(match.group(1) if match else "")
 PY
 )"
-if [ -n "${num_action_chunks}" ] && [ $(( rollout_steps % num_action_chunks )) -ne 0 ]; then
-  echo "error: rollout-steps ${rollout_steps} must be divisible by actor.model.num_action_chunks=${num_action_chunks} for ${config_name}" >&2
+effective_action_chunk="${action_chunk:-${config_num_action_chunks}}"
+if [ -n "${effective_action_chunk}" ] && [ $(( rollout_steps % effective_action_chunk )) -ne 0 ]; then
+  echo "error: rollout-steps ${rollout_steps} must be divisible by actor.model.num_action_chunks=${effective_action_chunk} for ${config_name}" >&2
   exit 1
 fi
 
@@ -188,6 +195,7 @@ training_completed_metadata="${log_dir}/training_completed.json"
 task_ids_override="[${task_ids}]"
 offline_demo_only_override="false"
 allow_demo_only_training_override="false"
+export CAVER_RLINF_FORCE_LOCAL_RAY="${CAVER_RLINF_FORCE_LOCAL_RAY:-1}"
 if ((offline_demo_only)); then
   offline_demo_only_override="true"
   allow_demo_only_training_override="true"
@@ -229,6 +237,8 @@ cmd=(
   "actor.micro_batch_size=${micro_batch}"
   "actor.model.model_path=${model_path}"
   "actor.model.add_value_head=true"
+  "actor.model.num_action_chunks=${effective_action_chunk}"
+  "actor.model.openpi.action_chunk=${effective_action_chunk}"
   "+actor.model.openpi.use_nft_loss=false"
   "actor.model.openpi.solver_type=flow_sde"
   "+actor.model.openpi.pytorch_compile_mode=null"

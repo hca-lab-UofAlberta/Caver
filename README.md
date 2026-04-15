@@ -25,6 +25,10 @@ As of `2026-04-13`:
 - SDRE-native setup for `openpi`, `LIBERO`, `pi-StepNFT`, and `GE-Sim` is in place.
 - Real-only and single-round provider-aware CAVER runs complete end to end on `gpu-l40s`.
 - The GE-Sim live-provider path is stable with split-GPU routing and RDSS-backed provider bundles.
+- The proposal-required round-1 seed calibrator path is now also validated:
+  - seed artifact: `metadata/stage0/calibrator/stage0_seed_dr_calibrator_mlp_v2.json`
+  - validation smoke: job `5887`
+  - result: `COMPLETED`, `1/5` successes, selector mode `lagged_dr_calibrated_softmax_v1`, next-round calibrator fit succeeded
 - The remaining method gate before PiPER is the full lagged Stage-E path:
   - provider -> DR dataset -> lagged calibrator -> refreshed next-round selector
 - The first explicit lagged validation run is job `5873`.
@@ -261,6 +265,15 @@ scripts/slurm/submit_stage0_caver_budget.sh \
 
 That is the right entrypoint for a clean single-round provider-aware Stage-E run.
 
+If you want the proposal-aligned round-1 seed-calibrator version, add:
+
+```bash
+  --value-proxy-model-path metadata/stage0/value_proxy/stage0_context_success_progress_sq_mlp3head_v2.json \
+  --dr-calibrator-model-path metadata/stage0/calibrator/stage0_seed_dr_calibrator_mlp_v2.json
+```
+
+The reference validation for that path is job `5887`, which completed end to end on `gpu-l40s` with the seed calibrator loaded from round start.
+
 ### 5. Explicit lagged Stage-E run
 
 The lagged driver is:
@@ -312,6 +325,16 @@ If someone new joins the project, this is the fastest path through the repo:
 7. `scripts/stagee/fit_stagee_dr_calibrator.py`
 8. `scripts/stagee/run_stage0_caver_round.sh`
 9. `scripts/stagee/run_stage0_caver_lagged_budget.py`
+
+Proposal-side neural replacements for the old linear surrogate path:
+
+- `scripts/stagee/run_train_stage0_value_proxy_mlp.sh`
+- `scripts/stagee/run_fit_stagee_dr_calibrator_mlp.sh`
+- `scripts/stagee/train_stage0_value_proxy_mlp.py`
+- `scripts/stagee/fit_stagee_dr_calibrator_mlp.py`
+- `scripts/stagee/tiny_mlp_artifact.py`
+
+Those scripts fit the width-256 GELU proxy/calibrator described in the proposal, but save plain JSON artifacts so runtime selection still works without importing `torch`.
 
 ## Collaboration and Git
 

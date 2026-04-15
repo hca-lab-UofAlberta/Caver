@@ -1,0 +1,27 @@
+{
+  "context_trace_count_mean": 75.40421002838221,
+  "contexts_total": 120,
+  "family_counts": {
+    "block_to_tray_proxy": 1452,
+    "container_insertion_proxy": 1252,
+    "drawer_open_proxy": 1920,
+    "relocate_to_region_proxy": 1920,
+    "two_object_stack_proxy": 1912
+  },
+  "input_path": "/projects/p57098/euijin1/Caver/metadata/stage0/value_proxy/stage0_seed_context_success_dataset.jsonl",
+  "label_counts": {
+    "0": 7360,
+    "1": 1096
+  },
+  "label_key": "context_success_label",
+  "label_positive_rate": 0.12961210974456008,
+  "nuisance_key": "raw_value_proxy",
+  "output_path": "/projects/p57098/euijin1/Caver/metadata/stage0/calibrator/stage0_seed_dr_candidate_dataset.jsonl",
+  "policy_query_index_max": 79,
+  "records_total": 8456,
+  "sample_weight_mean": 0.014191106906340706,
+  "sample_weight_total": 120.00000000001701,
+  "summary_path": "/projects/p57098/euijin1/Caver/metadata/stage0/calibrator/stage0_seed_dr_candidate_dataset.summary.json",
+  "weight_mode": "inverse_context_trace_count",
+  "workflow": "build_stage0_seed_calibrator_dataset_v1"
+}

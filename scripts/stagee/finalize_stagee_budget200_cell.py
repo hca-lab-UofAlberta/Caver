@@ -507,7 +507,7 @@ def main() -> int:
         "value_proxy_model_path": value_proxy_model_path_str,
         "value_proxy_model_id": value_proxy_model_id,
         "num_steps_wait": int(options.get("--num-steps-wait", "10")),
-        "replan_steps": int(options.get("--replan-steps", "5")),
+        "replan_steps": int(options.get("--replan-steps", "4")),
         "resize_size": int(options.get("--resize-size", "224")),
         "resolution": int(options.get("--resolution", "256")),
         "max_steps_override": parse_optional_int(options.get("--max-env-steps")),

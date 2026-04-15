@@ -362,7 +362,10 @@ def compute_selector_decision(
         selector_mode = CAVER_SELECTOR_MODE_FITTED
         value_proxy_source = str(value_proxy_model.get("model_id") or CAVER_SELECTOR_MODE_FITTED)
         value_proxy_model_id = value_proxy_source
+        utility_scale_source = value_proxy_source
+        utility_scale_model_id = value_proxy_source
         value_inputs = []
+        scale_inputs = []
         for metric in metrics:
             prediction = predict_value_proxy(
                 value_proxy_model,
@@ -370,18 +373,26 @@ def compute_selector_decision(
                 proxy_family_id=proxy_family_id,
                 policy_query_index=policy_query_index,
             )
-            value_inputs.append(float(prediction["probability"]))
+            predicted_mean = float(prediction.get("mean", prediction["probability"]))
+            predicted_scale = float(prediction.get("pre_scale", metric["raw_uncertainty_proxy"]))
+            value_inputs.append(predicted_mean)
+            scale_inputs.append(predicted_scale)
             metric["heuristic_raw_value_proxy"] = float(metric["raw_value_proxy"])
             metric["heuristic_value_ranknorm"] = float(metric["value_ranknorm"])
-            metric["lagged_nuisance_mean"] = float(prediction["probability"])
-            metric["admission_value_proxy"] = float(prediction["probability"])
+            metric["lagged_nuisance_mean"] = predicted_mean
+            metric["admission_value_proxy"] = predicted_mean
             metric["value_proxy_logit"] = float(prediction["logit"])
+            metric["value_proxy_pre_scale"] = predicted_scale
             metric["value_proxy_source"] = value_proxy_source
             metric["value_proxy_model_path"] = str(prediction["model_path"])
+            metric["utility_scale_source"] = utility_scale_source
         value_ranknorm = _ranknorm(value_inputs)
+        normalized_uncertainty = _minmax(scale_inputs)
         for index, metric in enumerate(metrics):
             metric["raw_value_proxy"] = float(value_inputs[index])
             metric["value_ranknorm"] = float(value_ranknorm[index])
+            metric["raw_uncertainty_proxy"] = float(scale_inputs[index])
+            metric["uncertainty_normalized"] = float(normalized_uncertainty[index])
 
     raw_scores = []
     for metric in metrics:
@@ -508,9 +519,15 @@ def summarize_admission_metrics(
         utility_mean = sum(
             float(metric.get("admission_value_proxy", metric["value_ranknorm"])) for metric in selected_metrics
         ) / float(len(selected_metrics))
-        uncertainty_mean = sum(metric["uncertainty_normalized"] for metric in selected_metrics) / float(
-            len(selected_metrics)
-        )
+        uncertainty_mean = sum(
+            float(
+                metric.get(
+                    "admission_uncertainty_proxy",
+                    metric.get("raw_uncertainty_proxy", metric["uncertainty_normalized"]),
+                )
+            )
+            for metric in selected_metrics
+        ) / float(len(selected_metrics))
         diversity_mean = sum(metric["diversity_normalized"] for metric in selected_metrics) / float(
             len(selected_metrics)
         )

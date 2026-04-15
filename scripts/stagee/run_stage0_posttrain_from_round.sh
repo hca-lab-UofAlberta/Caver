@@ -15,7 +15,7 @@ Required:
 
 Training options:
   --method NAME              real_only or caver (default: auto-detect from results dir)
-  --train-backend NAME       sac_demo or exact_offline_nft (default: sac_demo)
+  --train-backend NAME       sac_demo or exact_offline_nft (default: exact_offline_nft)
   --config-name NAME         RLinf config name (default: libero_goal_ppo_openpi_pi05)
   --policy-config NAME       OpenPI serve config name (default: pi05_libero)
   --base-model-path PATH     Base OpenPI PyTorch checkpoint dir
@@ -30,6 +30,7 @@ Training options:
   --min-buffer-size COUNT    Demo buffer gate (default: 256)
   --train-actor-steps COUNT  Demo buffer actor gate (default: 256)
   --update-epoch COUNT       RLinf update_epoch (default: 1)
+  --rollout-steps COUNT      RLinf train/eval rollout horizon (default: 4)
   --exact-trace-path PATH    Optional exact admitted-trace source for exact_offline_nft
   --exact-rollout-batch-path PATH
                              Reuse an existing exact rollout batch .pt and skip trace conversion
@@ -43,6 +44,7 @@ Held-out evaluation options:
   --eval-max-contexts COUNT  Optional cap for each held-out partition
   --eval-partitions NAMES    Comma-separated subset of eval phases: val,test (default: val,test)
   --max-env-steps COUNT      Optional rollout horizon override for held-out eval
+  --replan-steps COUNT       Held-out executed chunk horizon (default: 4)
   --libero-gl-backend NAME   egl or osmesa (default: osmesa)
 
 Resume / debug options:
@@ -56,7 +58,7 @@ EOF
 
 round_results_dir=""
 method=""
-train_backend="sac_demo"
+train_backend="exact_offline_nft"
 config_name="libero_goal_ppo_openpi_pi05"
 policy_config="pi05_libero"
 base_model_path="/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch"
@@ -71,6 +73,7 @@ global_batch="16"
 min_buffer_size="256"
 train_actor_steps="256"
 update_epoch="1"
+rollout_steps="4"
 exact_trace_path=""
 exact_rollout_batch_path_override=""
 
@@ -82,6 +85,7 @@ eval_seed="7"
 eval_max_contexts=""
 eval_partitions="val,test"
 max_env_steps=""
+replan_steps="4"
 libero_gl_backend="osmesa"
 
 skip_train=0
@@ -108,6 +112,7 @@ while (($# > 0)); do
     --min-buffer-size) min_buffer_size="${2:?missing value for --min-buffer-size}"; shift 2 ;;
     --train-actor-steps) train_actor_steps="${2:?missing value for --train-actor-steps}"; shift 2 ;;
     --update-epoch) update_epoch="${2:?missing value for --update-epoch}"; shift 2 ;;
+    --rollout-steps) rollout_steps="${2:?missing value for --rollout-steps}"; shift 2 ;;
     --exact-trace-path) exact_trace_path="${2:?missing value for --exact-trace-path}"; shift 2 ;;
     --exact-rollout-batch-path) exact_rollout_batch_path_override="${2:?missing value for --exact-rollout-batch-path}"; shift 2 ;;
     --manifest-path) manifest_path="${2:?missing value for --manifest-path}"; shift 2 ;;
@@ -118,6 +123,7 @@ while (($# > 0)); do
     --eval-max-contexts) eval_max_contexts="${2:?missing value for --eval-max-contexts}"; shift 2 ;;
     --eval-partitions) eval_partitions="${2:?missing value for --eval-partitions}"; shift 2 ;;
     --max-env-steps) max_env_steps="${2:?missing value for --max-env-steps}"; shift 2 ;;
+    --replan-steps) replan_steps="${2:?missing value for --replan-steps}"; shift 2 ;;
     --libero-gl-backend) libero_gl_backend="${2:?missing value for --libero-gl-backend}"; shift 2 ;;
     --skip-train) skip_train=1; shift ;;
     --skip-export) skip_export=1; shift ;;
@@ -196,6 +202,33 @@ if [ "${train_backend}" = "exact_offline_nft" ]; then
     echo "error: exact trace path not found: ${exact_trace_path}" >&2
     exit 1
   fi
+  python3 - "${exact_trace_path}" <<'PY'
+import json
+import pathlib
+import sys
+
+trace_path = pathlib.Path(sys.argv[1]).resolve()
+with trace_path.open("r", encoding="utf-8") as handle:
+    for line_number, line in enumerate(handle, start=1):
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        selected_policy_aux = record.get("selected_policy_aux")
+        if not isinstance(selected_policy_aux, dict) or not isinstance(
+            selected_policy_aux.get("forward_inputs"), dict
+        ):
+            context_id = record.get("context_id", "<unknown>")
+            raise SystemExit(
+                "error: exact_offline_nft requires exact-payload traces, but "
+                f"{trace_path} is missing selected_policy_aux.forward_inputs at "
+                f"line {line_number} context {context_id}. "
+                "This round was likely collected with openpi-native. "
+                "Re-run the online round with --server-mode openpi-exact or "
+                "--exact-rollout-payload, or use --train-backend sac_demo."
+            )
+        break
+PY
   if [ "${config_name}" = "libero_goal_ppo_openpi_pi05" ]; then
     config_name="libero_goal_nft_actor_openpi_pi05"
   fi
@@ -267,6 +300,8 @@ train_cmd=(
   --min-buffer-size "${min_buffer_size}"
   --train-actor-steps "${train_actor_steps}"
   --update-epoch "${update_epoch}"
+  --rollout-steps "${rollout_steps}"
+  --action-chunk "${rollout_steps}"
 )
 if [ -n "${train_loss_type}" ]; then
   train_cmd+=(--algorithm-loss-type "${train_loss_type}")
@@ -326,7 +361,7 @@ make_eval_cmd() {
     --candidate-count "1"
     --selection-policy "first"
     --num-steps-wait "10"
-    --replan-steps "5"
+    --replan-steps "${replan_steps}"
     --resize-size "224"
     --resolution "256"
     --results-path "${results_path}"
@@ -443,7 +478,7 @@ if ((skip_eval == 0)); then
     --candidate-count "1"
     --selection-policy "first"
     --num-steps-wait "10"
-    --replan-steps "5"
+    --replan-steps "${replan_steps}"
     --resize-size "224"
     --resolution "256"
     --results-path "${val_results_path}"
@@ -461,7 +496,7 @@ if ((skip_eval == 0)); then
     --candidate-count "1"
     --selection-policy "first"
     --num-steps-wait "10"
-    --replan-steps "5"
+    --replan-steps "${replan_steps}"
     --resize-size "224"
     --resolution "256"
     --results-path "${test_results_path}"

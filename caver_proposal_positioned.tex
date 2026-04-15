@@ -8,8 +8,7 @@
 \usepackage{amsthm}
 \usepackage{booktabs,tabularx,array,multirow,longtable}
 \usepackage{listings,xcolor}
-\usepackage[backend=biber,style=numeric,sorting=none,natbib=true,giveninits=true,maxbibnames=6,doi=false,url=true,isbn=false]{biblatex}
-\addbibresource{caver_proposal_positioned.bib}
+\usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
 \usepackage{xurl}
 \usepackage{enumitem}
@@ -25,7 +24,7 @@
 \setlength{\emergencystretch}{2em}
 \renewcommand{\arraystretch}{1.12}
 \urlstyle{same}
-\AtBeginBibliography{\footnotesize\sloppy\setlength{\bibitemsep}{0.15\baselineskip}}
+\setlength{\bibsep}{0.15\baselineskip}
 
 \definecolor{Accent}{HTML}{164E63}
 \definecolor{Accent2}{HTML}{0F766E}
@@ -54,7 +53,7 @@
 \newcommand{\argmax}{\mathop{\mathrm{argmax}}}
 
 \title{\textbf{CAVER: Calibrated Active Verification for Real-Interaction Post-Training of Vision-Language-Action Policies}\\[0.35em]
-\large Interface-general method specification with one concrete $\pi_{0.5}$ + GE-Sim + PiPER implementation plan}
+\large Interface-general method specification with concrete Stage-0 LIBERO and Stage-1 PiPER instantiations}
 \author{}
 \date{March 2026}
 
@@ -62,16 +61,16 @@
 \maketitle
 
 \begin{abstract}
-This proposal studies one practical question in VLA post-training: when only a small number of real robot executions can be trusted, how should those executions be spent so that a policy improves reliably? Recent work shows that real post-training can help, world models can cheaply generate large numbers of imagined futures, and flow-based VLA backbones such as $\pi_{0.5}$ are attractive but awkward for standard policy-gradient RL because action likelihoods are not directly available in the usual way \citep{tan2025riptvla,wang2026pistepnft,chen2025pirl,jiang2026wovr}. CAVER is therefore written at two levels. At the \emph{method level}, it is interface-general: it assumes only (i) a deterministic execution adapter $\Gamma_{\mathrm{exec}}$ that maps raw backbone chunks into a safety-checkable execution space, (ii) a provider adapter $\Phi_{\Omega}$ that maps execution chunks into the frozen provider's conditioning format, (iii) a deterministic safety shield $S_{\mathrm{safe}}$, and (iv) a verified labeler $M_{\mathrm{task}}$ that maps an executed episode to a trusted outcome. At the \emph{implementation level}, this proposal pins one concrete study on the pretrained $\pi_{0.5}$ backbone from \texttt{openpi}, frozen GE-Sim from Genie Envisioner, and real execution on PiPER \citep{liao2025genie,genierepo2026}.
+This proposal studies one practical question in VLA post-training: when only a small number of real robot executions can be trusted, how should those executions be spent so that a policy improves reliably? Recent work shows that real post-training can help, world models can cheaply generate large numbers of imagined futures, and flow-based VLA backbones such as $\pi_{0.5}$ are attractive but awkward for standard policy-gradient RL because action likelihoods are not directly available in the usual way \citep{tan2025riptvla,wang2026pistepnft,chen2025pirl,jiang2026wovr}. CAVER is therefore written at two levels. At the \emph{method level}, it is interface-general: it assumes only (i) a deterministic execution adapter $\Gamma_{\mathrm{exec}}$ that maps raw backbone chunks into a safety-checkable execution space, (ii) a provider adapter $\Phi_{\Omega}$ that maps execution chunks into the frozen provider's conditioning format, (iii) a deterministic safety shield $S_{\mathrm{safe}}$, and (iv) a verified labeler $M_{\mathrm{task}}$ that maps an executed episode to a trusted outcome. At the \emph{implementation level}, this proposal pins one staged study on the pretrained $\pi_{0.5}$ backbone from \texttt{openpi} and frozen GE-Sim from Genie Envisioner, with Stage 0 trusted execution in LIBERO simulation and Stage 1 real execution on PiPER \citep{liao2025genie,genierepo2026}.
 
-Within that general interface, the paper makes two more locked choices. First, the real-only update backend is a $\pi$-StepNFT-style executed-trajectory objective, not PPO or critic-heavy Q-learning \citep{wang2026pistepnft}. Second, the selector architecture is fixed after Stage 0; only its utility inputs are refreshed round-by-round through a doubly robust calibrator. At each decision context, $\pi_{0.5}$ proposes $K$ action chunks. A frozen provider predicts a short-horizon future for each chunk, and a small proxy head trained only on Stage-0 simulation and a seed real dataset produces a cheap utility estimate. A stochastic selector chooses one candidate for real execution from the safety-approved subset and logs its exact propensity. Every method shares the same deterministic pre-execution safety shield, so unsafe chunks are rejected before they can reach hardware. The resulting binary real outcome is then converted into doubly robust pseudo-outcomes for \emph{all safety-approved} candidates in that context using the logged propensity and the lagged nuisance model. A lagged calibrator converts cheap features into a corrected utility mean and scale. Only \emph{executed and confident} trajectories are then passed to the post-training backend. Cheap imagined candidates never directly update the backbone in the main paper. Whenever the paper compares calibration across methods, it does so through a common post-hoc diagnostic predictor rather than through each method's native online confidence output.
+Within that general interface, the paper makes two more locked choices. First, the real-only update backend is a $\pi$-StepNFT-style executed-trajectory objective, not PPO or critic-heavy Q-learning \citep{wang2026pistepnft}. Second, the selector architecture is fixed after Stage 0; only its utility inputs are refreshed round-by-round through a doubly robust calibrator. At each decision context, $\pi_{0.5}$ proposes $K$ action chunks. A frozen provider predicts a short-horizon future for each chunk, and a small proxy head trained only on Stage-0 simulation and a seed real dataset produces a cheap utility estimate. A stochastic selector chooses one candidate for trusted execution from the safety-approved subset and logs its exact propensity. Every method shares the same deterministic pre-execution safety shield, so unsafe chunks are rejected before they can reach the trusted execution environment. The resulting trusted binary outcome is then converted into doubly robust pseudo-outcomes for \emph{all safety-approved} candidates in that context using the logged propensity and the lagged nuisance model. A lagged calibrator converts cheap features into a corrected utility mean and scale. Only \emph{executed and confident} trajectories are then passed to the post-training backend. Cheap imagined candidates never directly update the backbone in the main paper. Whenever the paper compares calibration across methods, it does so through a common post-hoc diagnostic predictor rather than through each method's native online confidence output.
 
 The proposal is intentionally narrow. Its novelty claim is not that doubly robust estimation itself is new, and not that CAVER is a new end-to-end RL optimizer. The claim is that an \emph{online selective-verification layer} --- exact-propensity candidate selection, real-outcome correction, and conservative admission into an otherwise unchanged executed-sample backend --- can make a fixed flow-based VLA post-training stack more sample-efficient under the same verified real budget. The primary comparisons are therefore: (i) real-only $\pi$-StepNFT on the same $\pi_{0.5}$ backbone, (ii) the world-model-heavy WoVR baseline through RLinf, and (iii) attribution-focused ablations under exactly the same real-rollout budget \citep{jiang2026wovr,yu2025rlinf}. The intended paper is a carefully controlled one-robot, three-task real-budget study with an interface-general method statement, not a claim about all robots or all RL backends.
 \end{abstract}
 
 
 \begin{quote}
-\textbf{Thesis in one sentence.} Use one frozen provider for scale, use one small budget of real executions for truth, and place an interface-general selective-verification layer between them, with one fully pinned $\pi_{0.5}$ + GE-Sim + PiPER instantiation in the implementation plan.
+\textbf{Thesis in one sentence.} Use one frozen provider for scale, use one small budget of real executions for truth, and place an interface-general selective-verification layer between them, with one fully pinned Stage-0 LIBERO simulation instantiation and one fully pinned Stage-1 PiPER hardware instantiation in the implementation plan.
 \end{quote}
 
 
@@ -84,9 +83,9 @@ The proposal is intentionally narrow. Its novelty claim is not that doubly robus
 Decision point & Locked choice & Why it is locked \\
 \midrule
 Action backbone & Pretrained $\pi_{0.5}$ from \texttt{openpi} & Matches the public flow-based VLA stack and supports a direct comparison with flow-based real-only post-training \citep{pi052025,openpi2026repo}. \\
-Method presentation & Interface-general modules $(\Gamma_{\mathrm{exec}},\Phi_{\Omega},S_{\mathrm{safe}},M_{\mathrm{task}})$ plus one pinned PiPER study & Keeps the scientific claim at the interface level while preserving one exactly reproducible hardware instantiation in the implementation plan. \\
+Method presentation & Interface-general modules $(\Gamma_{\mathrm{exec}},\Phi_{\Omega},S_{\mathrm{safe}},M_{\mathrm{task}})$ plus concrete Stage-0 LIBERO and Stage-1 PiPER instantiations & Keeps the scientific claim at the interface level while preserving one exactly reproducible simulation-first path and one exactly reproducible hardware transfer study. \\
 Cheap future provider & Frozen GE-Sim from Genie Envisioner & Satisfies the preference for an off-the-shelf world model and keeps the paper about verification rather than training a new simulator \citep{liao2025genie,genierepo2026}. \\
-Concrete real execution stack & PiPER single-arm manipulation platform for the current study & Gives one auditable hardware instantiation; other robots change only the execution adapter, safety shield, labeler, and local configs. \\
+Concrete trusted-execution stacks & LIBERO simulation in Stage 0; PiPER single-arm manipulation in Stage 1 & Makes the debugging and calibration stage concrete before the real study while keeping the eventual hardware transfer equally auditable. \\
 Cheap utility head & Small 3-head MLP trained only on Stage 0 + seed real data & Avoids training a world model from scratch while still providing a task-specific scalar for selection. \\
 Real-only backend & $\pi$-StepNFT-style executed-trajectory fine-tuning & Fits flow-based VLAs without requiring tractable action likelihoods or a learned critic \citep{wang2026pistepnft,pistepnftrepo2026}. \\
 Execution safety & Shared deterministic safety shield plus runtime abort rules & Prevents unsafe candidate chunks from reaching hardware and makes the real study auditable across methods. \\
@@ -113,7 +112,7 @@ Finally, the proposal is positioned to be publishable because the claim is delib
 \paragraph{Contributions.}
 \begin{enumerate}
     \item A \textbf{problem formulation} for VLA post-training under limited real verification, in which a frozen off-the-shelf world-model provider produces cheap predicted futures while real execution supplies the trusted label.
-    \item A \textbf{two-layer CAVER specification}: an interface-general method defined by an execution adapter, provider adapter, safety shield, and verified labeler, together with one fully pinned $\pi_{0.5}$ + GE-Sim + PiPER instantiation.
+    \item A \textbf{two-layer CAVER specification}: an interface-general method defined by an execution adapter, provider adapter, safety shield, and verified labeler, together with concrete Stage-0 LIBERO and Stage-1 PiPER instantiations.
     \item A \textbf{roundwise selective-verification algorithm} with exact feature definitions, exact selector behavior, exact roundwise data flow, explicit frozen-vs-trainable components, and an implemented-path update backend.
     \item A \textbf{reproducible implementation and evaluation plan} using $\pi_{0.5}$, GE-Sim, PiPER, LIBERO, $\pi$-StepNFT, and WoVR/RLinf, with matched-budget baselines and a clear contingency plan if the primary provider integration stalls.
 \end{enumerate}
@@ -148,7 +147,7 @@ CAVER's scientific claim is not tied to PiPER-specific joint commands. At the me
 \qquad
  a \xrightarrow{\Phi_{\Omega}} \tilde a^{\Omega} \xrightarrow{\mathcal T_{\Omega}} \hat I \xrightarrow{V_{\omega},f_{\psi}} (\hat v,\hat\sigma,\mu,\sigma).
 \]
-Only four modules are robot- or simulator-specific: the execution adapter $\Gamma_{\mathrm{exec}}$, the safety shield $S_{\mathrm{safe}}$, the provider adapter $\Phi_{\Omega}$, and the verified labeler $M_{\mathrm{task}}$. The current study instantiates them with PiPER joint/gripper execution, a PiPER URDF-based safety shield, a PiPER-to-GE-Sim compatibility map, and a marker-based geometric labeler. Porting CAVER to another robot changes those modules and the local configs, but it does \emph{not} change selector scoring, exact propensity logging, doubly robust correction, calibrator fitting, or the StepNFT-style executed-update backend.
+Only four modules are robot- or simulator-specific: the execution adapter $\Gamma_{\mathrm{exec}}$, the safety shield $S_{\mathrm{safe}}$, the provider adapter $\Phi_{\Omega}$, and the verified labeler $M_{\mathrm{task}}$. The staged study instantiates them twice. In Stage 0, LIBERO supplies simulator execution, simulation-side candidate validity checks, a LIBERO-to-GE-Sim compatibility map, and the simulator task-success labeler. In Stage 1, PiPER supplies joint/gripper execution, a PiPER URDF-based safety shield, a PiPER-to-GE-Sim compatibility map, and a marker-based geometric labeler. Porting CAVER to another robot changes those modules and the local configs, but it does \emph{not} change selector scoring, exact propensity logging, doubly robust correction, calibrator fitting, or the StepNFT-style executed-update backend.
 
 \subsection{Why the mainline uses an off-the-shelf world model}
 The mainline method uses a frozen off-the-shelf provider because this is the cleanest way to isolate the proposed contribution. A new world model would introduce another training problem, another set of hyperparameters, and another source of failure. GE-Sim is therefore the primary provider because its public repository includes released GE-Sim weights, an example inference path, and explicit instructions for passing images, camera intrinsics/extrinsics, and actions into the simulator \citep{genierepo2026}. The proposal also keeps a local lightweight provider only as a \emph{contingency}; see Appendix~\ref{app:contingency}. Replacing GE-Sim in a future study would change $\Phi_{\Omega}$ and the provider-specific input bundle, not the selective-verification logic itself. The paper therefore generalizes across interfaces, not by claiming that every robot stack is already validated empirically.
@@ -181,11 +180,11 @@ This roundwise convention makes the theory--protocol link explicit. The potentia
 \subsection{Method-level interfaces and current instantiation}
 The method itself is written around two deterministic translation steps and two deterministic trust layers:
 \[
-\tilde a^{\pi}_{r,c,k}\xrightarrow{\Gamma_{\mathrm{exec}}} a_{r,c,k}\xrightarrow{S_{\mathrm{safe}}}\text{real execution},
+\tilde a^{\pi}_{r,c,k}\xrightarrow{\Gamma_{\mathrm{exec}}} a_{r,c,k}\xrightarrow{S_{\mathrm{safe}}}\text{trusted execution},
 \qquad
  a_{r,c,k}\xrightarrow{\Phi_{\Omega}} \tilde a^{\Omega}_{r,c,k}\xrightarrow{\mathcal T_{\Omega}} \hat I_{r,c,k,1:H}.
 \]
-The first map, $\Gamma_{\mathrm{exec}}$, turns raw backbone outputs into a safety-checkable execution-space chunk for the chosen robot. The second map, $\Phi_{\Omega}$, turns that same execution chunk into the frozen provider's conditioning format. The trust layers are (i) the hard safety shield $S_{\mathrm{safe}}$, which determines which candidates may be executed at all, and (ii) the verified labeler $M_{\mathrm{task}}$, which turns the executed episode into a trusted binary outcome. In the present study, $\Gamma_{\mathrm{exec}}$ is instantiated by a PiPER joint/gripper adapter, $\Phi_{\Omega}$ by a PiPER-to-GE-Sim compatibility map, $S_{\mathrm{safe}}$ by a PiPER URDF-based hard filter, and $M_{\mathrm{task}}$ by a marker-based geometric labeler. The selector, DR correction, calibrator, and StepNFT-style update backend do not depend on which concrete robot instantiates those four modules.
+The first map, $\Gamma_{\mathrm{exec}}$, turns raw backbone outputs into a safety-checkable execution-space chunk for the chosen trusted execution environment. The second map, $\Phi_{\Omega}$, turns that same execution chunk into the frozen provider's conditioning format. The trust layers are (i) the hard safety shield $S_{\mathrm{safe}}$, which determines which candidates may be executed at all, and (ii) the verified labeler $M_{\mathrm{task}}$, which turns the executed episode into a trusted binary outcome. In the present study, Stage 0 instantiates these modules with a LIBERO execution adapter, simulation-side validity checks, a LIBERO-to-GE-Sim compatibility map, and the simulator task labeler; Stage 1 instantiates them with a PiPER joint/gripper adapter, a PiPER-to-GE-Sim compatibility map, a PiPER URDF-based hard filter, and a marker-based geometric labeler. The selector, DR correction, calibrator, and StepNFT-style update backend do not depend on which concrete robot or simulator instantiates those four modules.
 
 \subsection{Master notation table}
 {\footnotesize
@@ -835,8 +834,8 @@ The continuous progress score $\bar Y$ is reported only as a diagnostic.
 \subsection{A publishability threshold}
 The project should be judged publishable only if it clears a concrete threshold. The paper is worth writing as a full methods paper if, at $N=100$, CAVER beats the real-only baseline on at least two of the three real tasks, beats or matches the world-model-heavy baseline on at least two of the three real tasks, clearly exceeds the $N=0$ seed-only anchor on the task-average success metric, and either (i) improves the \emph{common post-hoc} Brier score or ECE relative to the real-only baseline, or (ii) reaches the target success threshold $S^\star=0.70$ with fewer real training interactions on at least two of the three tasks. In addition, the mandatory attribution suite must show that the full CAVER configuration outperforms both the selection-only and admission-only ablations on task-average success at $N=100$, and the seed-size sweep must still show a positive gap over the seed-only anchor when results are plotted against $N_{\mathrm{total}}$. If those conditions are not met, the project should be reframed as an empirical negative-result or systems paper rather than oversold as a new learning method.
 
-\section{Concrete implementation plan: $\pi_{0.5}$ + GE-Sim + PiPER}
-This section pins one concrete instantiation of the abstract CAVER interfaces from the main method. For the present study, the concrete execution adapter is denoted
+\section{Concrete implementation plan: Stage-0 LIBERO and Stage-1 PiPER instantiations}
+This section pins two concrete instantiations of the abstract CAVER interfaces from the main method. Stage 0 is the simulation proxy study: LIBERO acts as the trusted execution environment, a LIBERO-specific execution adapter instantiates $\Gamma_{\mathrm{exec}}$, a LIBERO-to-GE-Sim bridge instantiates $\Phi_{\Omega}$, and the simulator task-success signal instantiates $M_{\mathrm{task}}$. Stage 1 is the real transfer study: the concrete execution adapter is denoted
 \[
 \Gamma_{\pi\rightarrow p}\coloneqq \Gamma_{\mathrm{exec}},
 \]
@@ -845,6 +844,11 @@ and maps raw $\pi_{0.5}$ chunks into PiPER joint/gripper execution commands. The
 \Phi_{\mathrm{GE}}\coloneqq \Phi_{\Omega},
 \]
 and maps those execution commands into the public GE-Sim conditioning format. The concrete safety shield is the PiPER URDF-based hard filter described below, and the concrete verified labeler is the marker-based geometric checker used in the Stage-1 real study. Porting CAVER to another robot changes these implementation modules and the associated local configs, but it does \emph{not} change selector scoring, exact propensity logging, doubly robust correction, calibrator fitting, or the StepNFT-style executed-update backend.
+
+\subsection{Concrete Stage-0 LIBERO simulation instantiation}
+Stage 0 is not just a debugging convenience; it is the concrete simulation instantiation used to fit the proxy head, lock selector defaults, and validate the roundwise protocol before any PiPER run is attempted. Each Stage-0 run uses LIBERO as the trusted execution environment, keeps the same chunk horizon $H=4$, candidate count $K=4$, round size $B_{\mathrm{round}}=25$, and matched counted-context budgets used later, and compares CAVER directly against the real-only $\pi$-StepNFT path plus attribution ablations on five LIBERO task families.
+
+The Stage-0 bridge preserves the method-level interfaces rather than introducing a separate algorithm. Raw $\pi_{0.5}$ chunks are converted into LIBERO simulator control commands through a deterministic execution adapter, the same chunks are mapped into GE-Sim-compatible provider arrays through a LIBERO-to-GE-Sim compatibility map, and the trusted label comes from the simulator's task-completion signal together with the fixed Stage-0 progress diagnostics. This makes the Stage-0 study a concrete provider-aware selective-verification experiment in its own right, not a placeholder for the PiPER section.
 
 \subsection{Two-machine deployment}
 Use two machines throughout the project.
@@ -949,6 +953,9 @@ python benchmark_scripts/download_libero_datasets.py \
   --datasets libero_object --use-huggingface
 \end{lstlisting}
 This follows the public LIBERO repository and dataset instructions \citep{libero2023benchmark,liberorepo2026}.
+
+\textbf{Stage-0 simulation protocol.}
+The concrete Stage-0 study uses the LIBERO adapter above to run the same candidate/chunk protocol that will later be used on PiPER: sample $K=4$ chunks from $\pi_{0.5}$, score them with the frozen provider and the fixed proxy-plus-calibrator stack, execute at most one safety-approved chunk per counted context, log the exact propensity, and train the unchanged StepNFT-style backend only on admitted executed trajectories. All Stage-0 headline plots compare CAVER against the real-only baseline under matched counted-context budgets on the five LIBERO proxy task families before any Stage-1 transfer claim is made.
 
 \textbf{World-model-heavy baseline (WoVR through RLinf).}
 \begin{lstlisting}
@@ -1087,7 +1094,7 @@ This proposal is publishable, if the experiments succeed, because it asks one na
 
 \textbf{Novelty relative to real-only post-training.} Real-only $\pi$-StepNFT asks how to update a flow-based VLA from executed trajectories. CAVER asks a different question: given the same real budget and the same executed-update backend, can better selection and correction collect \emph{more informative} executed trajectories \citep{wang2026pistepnft}? The main experimental burden is therefore attribution, which is why the paper requires the selection-only, admission-only, seed-size, utility-refresh, and proxy-target ablations.
 
-\textbf{Engineering realism.} The implementation uses public stacks that can actually be installed: openpi for $\pi_{0.5}$, GE-Sim for the frozen provider, PiPER SDK/ROS for the current execution study, LIBERO for Stage 0, and RLinf for WoVR. The method is written with interface-general interfaces, but the present paper still pins one complete PiPER instantiation so another lab can audit exactly what was run. The proposal also avoids unsupported claims about full online policy-gradient RL on the flow head and instead frames itself as a carefully controlled real-robot budget study.
+\textbf{Engineering realism.} The implementation uses public stacks that can actually be installed: openpi for $\pi_{0.5}$, GE-Sim for the frozen provider, LIBERO for the concrete Stage-0 simulation study, PiPER SDK/ROS for the concrete Stage-1 execution study, and RLinf for WoVR. The method is written with interface-general interfaces, but the present paper now pins both the simulation-first validation path and the later hardware transfer path so another lab can audit exactly what was run. The proposal also avoids unsupported claims about full online policy-gradient RL on the flow head and instead frames itself as a carefully controlled budgeted post-training study.
 
 
 \paragraph{Specific future extensions.} The most natural next steps are deliberately separated from the present claim. First, replace the executed-sample backend with a $\pi$RL-style Flow-SDE backend so that GRPO, PPO, or other true policy-gradient updates become feasible on $\pi_{0.5}$. Second, test whether two or more frozen providers improve robustness through disagreement-aware verification rather than a single GE-Sim predictor. Third, study learned selector policies and explicit safety monitors such as feature-based failure detectors. These are valuable follow-on projects, but excluding them from the main paper keeps the current proposal focused and testable.
@@ -1199,5 +1206,5 @@ If no selector satisfies the feasibility constraint, the rule deploys the baseli
 \section{Contingency-only local provider}\label{app:contingency}
 This appendix is \textbf{not} the main method. It exists only so that the project remains executable if the GE-Sim path is delayed. The contingency is a lightweight local latent provider: use the frozen $\pi_{0.5}$ context embedding, predict one short-horizon latent with a 2-layer MLP, and train a small preview decoder and value head on Stage-0 LIBERO plus seed real data. If this appendix is activated, the paper must state clearly that the mainline off-the-shelf provider failed to integrate on schedule. The scientific selective-verification layer remains unchanged.
 
-\printbibliography
+{\footnotesize\sloppy\bibliographystyle{unsrtnat}\bibliography{caver_proposal_positioned}}
 \end{document}

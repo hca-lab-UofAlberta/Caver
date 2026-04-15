@@ -104,7 +104,7 @@ selection_policy="caver_heuristic"
 selector_seed=""
 round_size="25"
 num_steps_wait="10"
-replan_steps="5"
+replan_steps="4"
 resize_size="224"
 resolution="256"
 max_env_steps=""
@@ -141,7 +141,7 @@ train_envs="1"
 eval_envs="1"
 runner_max_steps="1"
 runner_max_epochs="1"
-rollout_steps="5"
+rollout_steps="4"
 micro_batch="1"
 global_batch="2"
 replay_capacity="512"
@@ -520,6 +520,9 @@ if [ "${server_mode}" = "openpi-exact" ]; then
   fi
 fi
 exact_rlinf_config_name_effective="${exact_rlinf_config_name:-${config_name}}"
+if { [ "${server_mode}" = "openpi-exact" ] || ((exact_rollout_payload)); } && [ -z "${exact_action_chunk}" ]; then
+  exact_action_chunk="${replan_steps}"
+fi
 
 if [ -z "${results_dir}" ]; then
   if [ -n "${CAVER_RUN_DIR:-}" ]; then
@@ -693,8 +696,7 @@ dr_dataset_cmd=(
 )
 
 dr_calibrator_cmd=(
-  python3
-  "${CAVER_REPO_ROOT}/scripts/stagee/fit_stagee_dr_calibrator.py"
+  "${CAVER_REPO_ROOT}/scripts/stagee/run_fit_stagee_dr_calibrator_mlp.sh"
   --dataset-path "${dr_dataset_path}"
   --output-path "${next_dr_calibrator_path}"
   --summary-path "${next_dr_calibrator_summary_path}"
@@ -726,6 +728,7 @@ train_cmd=(
   --max-steps "${runner_max_steps}"
   --max-epochs "${runner_max_epochs}"
   --rollout-steps "${rollout_steps}"
+  --action-chunk "${rollout_steps}"
   --micro-batch "${micro_batch}"
   --global-batch "${global_batch}"
   --replay-capacity "${replay_capacity}"

@@ -28,7 +28,7 @@ Online execution options:
   --selector-seed COUNT        Optional selector RNG seed (defaults to --seed)
   --round-size COUNT           Budget round size annotation (default: 25)
   --num-steps-wait COUNT       Warmup dummy-action steps (default: 10)
-  --replan-steps COUNT         Executed action chunk length (default: 5)
+  --replan-steps COUNT         Executed action chunk length (default: 4)
   --resize-size COUNT          Policy image size (default: 224)
   --resolution COUNT           LIBERO render resolution (default: 256)
   --max-env-steps COUNT        Optional LIBERO horizon override
@@ -58,7 +58,7 @@ Backend update options:
   --eval-envs COUNT            Eval env count (default: 1)
   --runner-max-steps COUNT     RLinf runner max_steps (default: 1)
   --runner-max-epochs COUNT    RLinf runner max_epochs (default: 1)
-  --rollout-steps COUNT        RLinf env rollout-step setting (default: 5)
+  --rollout-steps COUNT        RLinf env rollout-step setting (default: 4)
   --micro-batch COUNT          RLinf actor micro batch size (default: 1)
   --global-batch COUNT         RLinf actor global batch size (default: 2)
   --replay-capacity COUNT      Replay buffer capacity (default: 512)
@@ -90,7 +90,7 @@ selection_policy="uniform"
 selector_seed=""
 round_size="25"
 num_steps_wait="10"
-replan_steps="5"
+replan_steps="4"
 resize_size="224"
 resolution="256"
 max_env_steps=""
@@ -117,7 +117,7 @@ train_envs="1"
 eval_envs="1"
 runner_max_steps="1"
 runner_max_epochs="1"
-rollout_steps="5"
+rollout_steps="4"
 micro_batch="1"
 global_batch="2"
 replay_capacity="512"
@@ -430,6 +430,9 @@ if [ "${server_mode}" = "openpi-exact" ]; then
   fi
 fi
 exact_rlinf_config_name_effective="${exact_rlinf_config_name:-${config_name}}"
+if { [ "${server_mode}" = "openpi-exact" ] || ((exact_rollout_payload)); } && [ -z "${exact_action_chunk}" ]; then
+  exact_action_chunk="${replan_steps}"
+fi
 
 if [ -z "${results_dir}" ]; then
   if [ -n "${CAVER_RUN_DIR:-}" ]; then
@@ -559,6 +562,7 @@ train_cmd=(
   --max-steps "${runner_max_steps}"
   --max-epochs "${runner_max_epochs}"
   --rollout-steps "${rollout_steps}"
+  --action-chunk "${rollout_steps}"
   --micro-batch "${micro_batch}"
   --global-batch "${global_batch}"
   --replay-capacity "${replay_capacity}"
