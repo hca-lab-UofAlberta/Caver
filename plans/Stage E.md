@@ -50,6 +50,84 @@ This ordering is intentional. It satisfies the proposal's main claim first and k
   - deferred
   - infeasible under current SDRE constraints
 
+## Closure status on 2026-04-17
+
+- The strict proposal-mainline Stage-E comparison is now complete at budget `N=50` for seeds `{7, 13, 29}`.
+- Final matched comparison:
+  - CAVER lagged:
+    - online success mean: `0.387`
+    - held-out validation mean: `0.200`
+    - held-out test mean: `0.223`
+    - admitted contexts mean: `10`
+    - admitted demo items mean: `338`
+    - primitive steps mean: `1338`
+  - real-only:
+    - online success mean: `0.400`
+    - held-out validation mean: `0.203`
+    - held-out test mean: `0.213`
+    - admitted contexts mean: `50`
+    - demo items mean: `3807`
+    - primitive steps mean: `15194`
+- Interpretation:
+  - Stage E is satisfactory to close for the mainline simulation claim.
+  - The result supports a sample-efficiency paper claim, not a dominant raw-success claim.
+  - CAVER is slightly better on held-out test success while using about `11.3x` fewer admitted demo items and `11.4x` fewer primitive steps in the unchanged backend.
+- Paper artifacts refreshed from the authoritative Stage-E outputs:
+  - figure: `figures/stagee_mainline_budget50_summary.pdf`
+  - source summary: `figures/stagee_mainline_budget50_summary.json`
+- Next stage after Stage E closure:
+  - carry the frozen mainline path into Stage F / PiPER transfer readiness
+  - keep additional Stage-E ablations as optional follow-on analysis, not as blockers for the core simulation-first claim
+
+## Current recovery status on 2026-04-16
+
+- The latest Stage-E recovery wave is active after a walltime failure, not a method failure.
+- Root cause of the broken wave:
+  - real-only jobs `6021`, `6022`, `6023` reached `TIMEOUT` at `05:00:00` after already finishing all `50/50` online contexts and writing `real_only_online_eval.json`, `real_only_online_contexts.jsonl`, and `real_only_online_chunks.jsonl`
+  - lagged CAVER jobs `6024`, `6025`, `6026` were under-timed for the second `25`-context round and were cancelled before they could burn the remaining walltime
+  - dependent held-out jobs `6027` through `6032` were cancelled with that failed dependency chain
+- Recovery fix now in repo:
+  - `scripts/stagee/run_stage0_caver_lagged_budget.py` now supports `--resume-existing` and `--cleanup-incomplete-rounds`
+  - completed lagged subrounds are reused in place
+  - incomplete lagged subround directories are removed and rerun explicitly instead of forcing a full budget rerun
+- Active recovery jobs:
+  - real-only resume jobs: `6036`, `6038`, `6040`
+  - dependent real-only held-out jobs: `6037`, `6039`, `6041`
+  - lagged CAVER resume jobs: `6042`, `6044`, `6046`
+  - dependent CAVER held-out jobs: `6043`, `6045`, `6047`
+- Active recovery partitioning:
+  - recovery is running on `gpu-h200`
+  - real-only resumes use `1x H200` and `02:00:00`
+  - lagged CAVER resumes use `2x H200` and `12:00:00`
+- Startup verification already confirmed:
+  - each CAVER resume job is reusing completed `round_001`
+  - each CAVER resume job is deleting only the incomplete `round_002` directory and rerunning that round
+  - no immediate startup errors are present in the new stderr logs
+- Estimated completion window from the current restart:
+  - real-only resume jobs should finish first, likely within about `0.5` to `2` hours from submission on `2026-04-16`
+  - lagged CAVER resume jobs are the long pole; the safe budget is now `12` hours, but expected completion is earlier if `gpu-h200` materially improves the second-round throughput
+  - dependent held-out jobs start automatically after the corresponding recovery jobs succeed
+- 2026-04-17 refresh:
+  - real-only seed `29` recovery job `6040` is now confirmed as a pure walltime failure, not a method failure
+    - authoritative log line from `/rdss/p57098/euijin1/caver/logs/slurm/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget50__20260416T222545Z__resume-6040.err`:
+      - `[2026-04-17T00:29:03.014] error: *** JOB 6040 ON h200-01 CANCELLED AT 2026-04-17T00:29:03 DUE TO TIME LIMIT ***`
+    - online rollout and demo conversion were already complete before that cutoff
+    - the missing artifact was only `real_only_round_summary.json`, which depends on the backend training phase finishing
+  - replacement recovery chain has been submitted:
+    - `6050`: real-only seed `29` training-only resume on `gpu-h200`, `1x H200`, `04:00:00`
+    - `6051`: dependent held-out posttrain for seed `29`, `afterok:6050`, `gpu-h200`, `1x H200`, `08:00:00`
+    - stale predecessor `6041` was later cancelled manually after its dependency became permanently unsatisfied from `6040`
+  - live verification for `6050`:
+    - `squeue` at `2026-04-17 01:16:23` America/Edmonton showed `6050 RUNNING` on `h200-01` and `6051 PENDING (Dependency)`
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget50__20260416T222545Z__resume2-6050.err` proves the job is reusing the existing sharded demo manifest under the original results directory
+    - the same stderr log already advanced through replay-buffer shard loading and into `runner.init_workers`, so the retry is past the old startup point
+  - stale dependency cleanup:
+    - `6041` had state `PENDING (DependencyNeverSatisfied)` because it was bound to `afterok:6040(failed)`
+    - it was cancelled explicitly on `2026-04-17` once `6051` was confirmed as the active replacement held-out job
+  - updated finish expectation from the `6050` submission time:
+    - seed `29` real-only recovery upper bound: `2026-04-17 05:56:00` America/Edmonton
+    - dependent seed `29` held-out posttrain upper bound after start: `8` hours, but expected earlier if it tracks the seed `7` / `13` posttrain runtime
+
 ## Bring-up status entering Stage E
 
 - The native OpenPI LIBERO smoke path has now been exercised on SDRE.
@@ -3023,3 +3101,866 @@ This ordering is intentional. It satisfies the proposal's main claim first and k
       - `5974`:
         - state `PENDING (Dependency)`
         - if `5973` succeeds near its walltime bound, the 8-hour held-out upper bound lands around `2026-04-16 02:38` America/Edmonton
+  - finished-state update after the recovery wave completed on `2026-04-15`:
+    - `5964`:
+      - `COMPLETED`, exit `0:0`, elapsed `03:14:15`
+      - seed-`13` real-only held-out result:
+        - online source eval recovered from `/rdss/p57098/euijin1/caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget25__20260415T113159Z/results/real_only_online_eval.json`
+        - online `10/25 = 0.40`
+        - held-out validation `20/100 = 0.20`
+        - held-out test `22/100 = 0.22`
+    - `5965 -> 5966`:
+      - both `COMPLETED`, exit `0:0`
+      - seed-`13` CAVER result:
+        - online `10/25 = 0.40`
+        - admission accepted `4/25` contexts
+        - admitted demo items `132`
+        - admitted primitive steps `520`
+        - held-out validation `23/100 = 0.23`
+        - held-out test `22/100 = 0.22`
+      - authoritative artifacts:
+        - round summary `/rdss/p57098/euijin1/caver/runs/stagee__caver-reprocess__stagee__caver-round__manifest-t_train_s0-all__seed13__budget25__20260415t113159z__seed13__budget25__20260415T201523Z/results/caver_round_summary.json`
+        - held-out summary `/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-reprocess__stagee__caver-round__manifest-t_train_s0-all__seed13__budget25__20260415t113159z__seed13__budget25__20260415T201523Z/posttrain_holdout_summary.json`
+    - `5973`:
+      - `COMPLETED`, exit `0:0`, elapsed `00:30:17`
+      - seed-`29` CAVER reprocess succeeded under the forced-local-Ray fix
+      - result:
+        - online `10/25 = 0.40`
+        - admission accepted `5/25` contexts
+        - admitted demo items `167`
+        - admitted primitive steps `658`
+      - authoritative round summary:
+        - `/rdss/p57098/euijin1/caver/runs/stagee__caver-reprocess__stagee__caver-round__manifest-t_train_s0-all__seed29__budget25__20260415t113200z__seed29__budget25__20260415T223759Z/results/caver_round_summary.json`
+    - `5974`:
+      - `FAILED`, exit `1:0`, elapsed `00:00:01`
+      - cause:
+        - the dependent held-out launcher defaulted to `exact_offline_nft`
+        - but the repaired seed-`29` CAVER round still comes from `openpi-native` traces without `selected_policy_aux.forward_inputs`
+        - preflight correctly aborted with:
+          - `error: exact_offline_nft requires exact-payload traces ... use --train-backend sac_demo`
+      - this is a launcher/default mismatch, not a new Stage-E method failure
+    - replacement held-out job:
+      - `5975` submitted on `2026-04-15 18:22:13` America/Edmonton
+      - command explicitly pins `--train-backend sac_demo`
+      - current status at submission check:
+        - `RUNNING` on `l40s-01`
+        - walltime limit `08:00:00`
+        - scheduler upper bound `2026-04-16 02:22:13` America/Edmonton
+      - expected output root:
+        - `/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-reprocess__stagee__caver-round__manifest-t_train_s0-all__seed29__budget25__20260415t113200z__seed29__budget25__20260415T223759Z`
+  - current replication snapshot before `5975` finishes:
+    - seed `7`:
+      - real-only:
+        - online `0.40`
+        - validation `0.21`
+        - test `0.22`
+      - CAVER:
+        - online `0.36`
+        - validation `0.22`
+        - test `0.23`
+    - seed `13`:
+      - real-only:
+        - online `0.40`
+        - validation `0.20`
+        - test `0.22`
+      - CAVER:
+        - online `0.40`
+        - validation `0.23`
+        - test `0.22`
+    - seed `29`:
+      - real-only:
+        - online `0.40`
+        - validation `0.21`
+        - test `0.21`
+      - CAVER:
+        - online `0.40`
+        - held-out still pending completion of `5975`
+  - final update after `5975` completed on `2026-04-15`:
+    - `5975`:
+      - `COMPLETED`, exit `0:0`, elapsed `03:08:55`
+      - start `2026-04-15 18:22:13` America/Edmonton
+      - end `2026-04-15 21:31:08` America/Edmonton
+      - seed-`29` CAVER held-out result:
+        - online `10/25 = 0.40`
+        - admission accepted `5/25` contexts
+        - admitted demo items `167`
+        - admitted primitive steps `658`
+        - held-out validation `20/100 = 0.20`
+        - held-out test `20/100 = 0.20`
+      - authoritative held-out summary:
+        - `/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-reprocess__stagee__caver-round__manifest-t_train_s0-all__seed29__budget25__20260415t113200z__seed29__budget25__20260415T223759Z/posttrain_holdout_summary.json`
+  - completed 3-seed `budget=25` replication snapshot:
+    - seed `7`:
+      - real-only:
+        - online `0.40`
+        - validation `0.21`
+        - test `0.22`
+      - CAVER:
+        - online `0.36`
+        - validation `0.22`
+        - test `0.23`
+        - admitted contexts `4/25`
+        - demo items `139`
+    - seed `13`:
+      - real-only:
+        - online `0.40`
+        - validation `0.20`
+        - test `0.22`
+      - CAVER:
+        - online `0.40`
+        - validation `0.23`
+        - test `0.22`
+        - admitted contexts `4/25`
+        - demo items `132`
+    - seed `29`:
+      - real-only:
+        - online `0.40`
+        - validation `0.21`
+        - test `0.21`
+      - CAVER:
+        - online `0.40`
+        - validation `0.20`
+        - test `0.20`
+        - admitted contexts `5/25`
+        - demo items `167`
+    - aggregate read over the three seeds:
+      - real-only mean:
+        - online `0.400`
+        - validation `0.207`
+        - test `0.217`
+      - CAVER mean:
+        - online `0.387`
+        - validation `0.217`
+        - test `0.217`
+      - sample-efficiency ratio:
+        - CAVER used `438` admitted demo items across the three seeds versus about `5686` real-only demo items
+        - that is about `7.7%` of the real-only demo volume at essentially matched mean test success and a slightly better mean validation success
+    - interpretation:
+      - this `budget=25` Stage-E cell supports the sample-efficiency framing better than a dominant-success-rate framing
+      - CAVER does not dominate real-only on every seed
+      - but it stays close on held-out success while using much less admitted data
+  - proposal-mainline launch-layer closure on `2026-04-15`:
+    - added dedicated lagged Slurm wrapper:
+      - `scripts/slurm/submit_stage0_caver_lagged_budget.sh`
+    - Stage-E budget submitters now expose an explicit proposal-mainline switch:
+      - `scripts/slurm/submit_stage0_caver_budget.sh --proposal-mainline`
+      - `scripts/slurm/submit_stage0_real_only_budget.sh --proposal-mainline`
+    - CAVER `--proposal-mainline` expands to the previously manual bundle:
+      - lagged driver
+      - `openpi-exact`
+      - exact rollout payload capture
+      - `gesim_live_summary`
+      - seeded proposal-side MLP value proxy
+      - seeded proposal-side MLP DR calibrator
+    - real-only `--proposal-mainline` now pins the matched exact-rollout baseline path:
+      - `openpi-exact`
+      - exact rollout payload capture
+    - this closes the remaining launch/default gap in the strict proposal-mainline path
+    - remaining Stage-E work after this patch is empirical:
+      - rerun the Stage-E comparison under the new proposal-mainline mode and judge whether the simulation result is strong enough to freeze before PiPER
+  - first proposal-mainline reruns launched on `2026-04-15`:
+    - `5982`:
+      - method: CAVER
+      - path: strict proposal-mainline
+      - config:
+        - budget `50`
+        - seed `7`
+        - lagged rounds `25 + 25`
+        - `openpi-exact`
+        - exact rollout payload capture
+        - `gesim_live_summary`
+        - Stage-0 MLP value proxy + seeded MLP DR calibrator
+      - scheduler state at launch check:
+        - `RUNNING` on `l40s-01`
+        - start `2026-04-15 23:56:49` America/Edmonton
+        - walltime limit `05:30:00`
+        - scheduler upper bound `2026-04-16 05:26:49` America/Edmonton
+      - early log validation:
+        - round `1/2` started
+        - exact policy server metadata reports `exact_action_chunk=4`
+        - evaluator connected on `ws://127.0.0.1:23982`
+        - LIBERO manifest execution started with `25` contexts for round `1`
+    - `5983`:
+      - method: real-only baseline
+      - path: strict proposal-mainline matched exact baseline
+      - config:
+        - budget `50`
+        - seed `7`
+        - `openpi-exact`
+        - exact rollout payload capture
+      - scheduler state at launch check:
+        - `RUNNING` on `l40s-01`
+        - start `2026-04-15 23:56:50` America/Edmonton
+        - walltime limit `02:00:00`
+        - scheduler upper bound `2026-04-16 01:56:50` America/Edmonton
+      - early log validation:
+        - exact policy server metadata reports `exact_action_chunk=4`
+        - evaluator connected on `ws://127.0.0.1:23983`
+        - LIBERO manifest execution started with `50` contexts
+    - follow-up hardening during launch validation:
+      - bridge policy-server logs were timestamp-only and could collide for concurrent jobs started in the same second
+      - `scripts/bridge/run_libero_remote_eval.sh` now includes run id, port, and shell pid in the server-log filename
+      - this does not change the already-running jobs above, but it removes the collision for the next parallel submission wave
+  - full strict-mainline `budget=50` wave queued on `2026-04-16`:
+    - additional online jobs submitted in parallel:
+      - `5985`:
+        - method: real-only exact baseline
+        - seed `13`
+        - state at queue check:
+          - `RUNNING` on `l40s-01`
+          - start `2026-04-16 01:13:06` America/Edmonton
+          - walltime limit `02:00:00`
+          - scheduler upper bound `2026-04-16 03:13:06` America/Edmonton
+        - early health:
+          - connected to exact policy server on port `23985`
+          - evaluator started `50`-context manifest execution
+      - `5986`:
+        - method: real-only exact baseline
+        - seed `29`
+        - state at queue check:
+          - `RUNNING` on `l40s-02`
+          - start `2026-04-16 01:13:06` America/Edmonton
+          - walltime limit `02:00:00`
+          - scheduler upper bound `2026-04-16 03:13:06` America/Edmonton
+        - early health:
+          - policy-server log path resolved uniquely under the new run-id/port naming
+      - `5987`:
+        - method: CAVER strict proposal-mainline
+        - seed `13`
+        - state at queue check:
+          - `RUNNING` on `l40s-03`
+          - start `2026-04-16 01:13:06` America/Edmonton
+          - walltime limit `05:30:00`
+          - scheduler upper bound `2026-04-16 06:43:06` America/Edmonton
+        - early health:
+          - lagged round `1/2` launched
+          - exact payload path active
+          - GE-Sim live summary provider active
+          - seeded MLP proxy / DR calibrator injected from round start
+      - `5988`:
+        - method: CAVER strict proposal-mainline
+        - seed `29`
+        - state at queue check:
+          - `RUNNING` on `l40s-03`
+          - start `2026-04-16 01:13:06` America/Edmonton
+          - walltime limit `05:30:00`
+          - scheduler upper bound `2026-04-16 06:43:06` America/Edmonton
+        - early health:
+          - lagged round `1/2` launched
+          - exact payload path active
+          - GE-Sim live summary provider active
+          - seeded MLP proxy / DR calibrator injected from round start
+    - dependent held-out post-train / evaluation jobs submitted:
+      - seed `7`:
+        - `5989`: CAVER held-out, dependency `afterok:5982`
+        - `5990`: real-only held-out, dependency `afterok:5983`
+      - seed `13`:
+        - `5991`: CAVER held-out, dependency `afterok:5987`
+        - `5993`: real-only held-out, dependency `afterok:5985`
+      - seed `29`:
+        - `5992`: CAVER held-out, dependency `afterok:5988`
+        - `5994`: real-only held-out, dependency `afterok:5986`
+      - all six are currently `PENDING (Dependency)`
+      - held-out launcher path:
+        - `scripts/slurm/submit_stage0_posttrain_from_round.sh`
+      - held-out backend path:
+        - default `exact_offline_nft`
+        - artifact root `/rdss/p57098/euijin1/caver/stagee_posttrain`
+    - practical finish criterion for this wave:
+      - online jobs to complete:
+        - `5982`, `5983`, `5985`, `5986`, `5987`, `5988`
+      - dependent held-out jobs to complete after those:
+        - `5989`, `5990`, `5991`, `5992`, `5993`, `5994`
+      - if all twelve finish cleanly, the strict-mainline 3-seed `budget=50` Stage-E cell is complete
+  - GE-Sim visual inspection utility is now in place on `2026-04-16`:
+    - new renderer:
+      - [scripts/stagee/render_gesim_visual_comparison.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/render_gesim_visual_comparison.py)
+    - verified output from the known-good GE-Sim smoke bundle:
+      - bundle root:
+        - `.tmp/gesim_bundle_smoke`
+      - GE-Sim output root:
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-infer__libero-bundle-smoke__seed0__budget2__20260412T121638Z/results/gesim_infer_smoke`
+      - rendered overview:
+        - `.tmp/gesim_visuals/smoke_overview.png`
+    - current training-path limitation:
+      - the live Stage-E provider path stores LIBERO bundle history images and compact GE-Sim summary features by default
+      - it does not persist GE-Sim preview videos unless preview artifacts are explicitly enabled for a rerun
+      - exact same-candidate `GE-Sim generated future vs LIBERO rollout future` inspection therefore still requires a targeted rerun with preview saving, and a LIBERO video capture if ground-truth rollout frames are also desired
+  - targeted same-candidate GE-Sim-vs-LIBERO future comparison is now launched on `2026-04-16`:
+    - new trace-aware renderer:
+      - [scripts/stagee/render_gesim_trace_future_comparison.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/render_gesim_trace_future_comparison.py)
+    - selected source chunk:
+      - trace path:
+        - `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T071306Z/results/lagged_rounds/round_001/caver_online_chunks.jsonl`
+      - context id:
+        - `block_to_tray_proxy__libero_90__task57__init011`
+      - policy query index:
+        - `1`
+      - selected candidate index:
+        - `0`
+      - bundle root:
+        - `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T071306Z/results/lagged_rounds/round_001/provider_bundles/block_to_tray_proxy__libero_90__task57__init011/query_001/candidate_00`
+    - Slurm rerun job:
+      - `5995`
+      - stage/method/task:
+        - `stagee / gesim-trace-compare / block_to_tray_q001`
+      - partition / QoS:
+        - `gpu-l40s / interactive`
+      - node:
+        - `l40s-02`
+      - start time:
+        - `2026-04-16 01:42:13` America/Edmonton
+      - walltime cap / ETA upper bound:
+        - `01:00:00`, so no later than `2026-04-16 02:42:13` America/Edmonton unless requeued
+      - expected artifacts if clean:
+        - `${CAVER_RUN_DIR}/results/gesim_rerun/video.gif` or `video.pt`
+        - `${CAVER_RUN_DIR}/results/gesim_vs_libero_future.png`
+    - final outcome:
+      - `5995`: `COMPLETED`
+      - elapsed:
+        - `00:00:53`
+      - run dir:
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-trace-compare__block_to_tray_q001__seed29__budget50__20260416T074213Z`
+      - output artifacts:
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-trace-compare__block_to_tray_q001__seed29__budget50__20260416T074213Z/results/gesim_rerun/video.gif`
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-trace-compare__block_to_tray_q001__seed29__budget50__20260416T074213Z/results/gesim_rerun/video.pt`
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-trace-compare__block_to_tray_q001__seed29__budget50__20260416T074213Z/results/gesim_vs_libero_future.png`
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-trace-compare__block_to_tray_q001__seed29__budget50__20260416T074213Z/results/gesim_vs_libero_future.gif`
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-trace-compare__block_to_tray_q001__seed29__budget50__20260416T074213Z/results/gesim_vs_libero_future.mp4`
+      - comparison scope:
+        - input history from the selected provider bundle
+        - GE-Sim generated future for `head` and `hand_right`
+        - logged LIBERO future from the selected chunk trace for `frontview/head` and `wrist`
+      - known limitation:
+        - `hand_left` ground-truth future is still absent from the chunk trace, so the trace-based comparison only covers `head` and `wrist/hand_right`
+      - animation renderer:
+        - [scripts/stagee/render_gesim_trace_future_animation.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/render_gesim_trace_future_animation.py)
+      - animation metadata:
+        - GIF frame count:
+          - `4`
+        - GIF canvas:
+          - `708x800`
+        - MP4 duration:
+          - `2.7` seconds
+  - strict-mainline recovery wave launched on `2026-04-16` after the first `budget=50` sweep failed:
+    - failure diagnosis for the replaced jobs:
+      - `5982`:
+        - root cause:
+          - older copy of `scripts/bridge/run_libero_remote_eval.sh` had a shell quoting bug
+        - exact terminal error from the Slurm stderr log:
+          - `/projects/p57098/euijin1/Caver/scripts/bridge/run_libero_remote_eval.sh: line 308: unexpected EOF while looking for matching '"'`
+        - current status of the bug:
+          - the checked-in bridge script now passes `bash -n`, so this is treated as fixed code rather than an active blocker
+      - `5983`, `5985`, `5986`:
+        - root cause:
+          - walltime underestimation only
+        - observed behavior:
+          - all three real-only runs were still progressing through manifest contexts when the `02:00:00` cap cancelled them
+      - `5987`, `5988`:
+        - root cause:
+          - walltime underestimation only
+        - observed behavior:
+          - lagged round `1/2` completed, round `2/2` started, and Slurm cancelled the jobs at the old `05:30:00` cap
+    - launcher fixes applied before resubmission:
+      - `scripts/slurm/submit_stage0_real_only_budget.sh`
+        - proposal-mainline default time bumped to `05:00:00` unless `--time` is explicitly supplied
+      - `scripts/slurm/submit_stage0_caver_budget.sh`
+        - proposal-mainline default time bumped to `08:30:00`
+      - `scripts/slurm/submit_stage0_caver_lagged_budget.sh`
+        - default time bumped to `08:30:00`
+      - syntax verification:
+        - `bash -n scripts/slurm/submit_stage0_real_only_budget.sh`
+        - `bash -n scripts/slurm/submit_stage0_caver_budget.sh`
+        - `bash -n scripts/slurm/submit_stage0_caver_lagged_budget.sh`
+    - replacement online jobs now running:
+      - `6008`:
+        - method:
+          - real-only strict proposal-mainline
+        - seed:
+          - `7`
+        - start:
+          - `2026-04-16 14:36:44` America/Edmonton
+        - walltime:
+          - `05:00:00`
+        - scheduler upper bound:
+          - `2026-04-16 19:36:44` America/Edmonton
+        - early health:
+          - exact policy server connected
+          - manifest execution reached `context 1/50`
+      - `6009`:
+        - method:
+          - real-only strict proposal-mainline
+        - seed:
+          - `13`
+        - start:
+          - `2026-04-16 14:36:44` America/Edmonton
+        - walltime:
+          - `05:00:00`
+        - scheduler upper bound:
+          - `2026-04-16 19:36:44` America/Edmonton
+        - early health:
+          - exact policy server connected
+          - manifest execution reached `context 1/50`
+      - `6010`:
+        - method:
+          - real-only strict proposal-mainline
+        - seed:
+          - `29`
+        - start:
+          - `2026-04-16 14:36:44` America/Edmonton
+        - walltime:
+          - `05:00:00`
+        - scheduler upper bound:
+          - `2026-04-16 19:36:44` America/Edmonton
+        - early health:
+          - exact policy server connected
+          - manifest execution reached `context 1/50`
+      - `6011`:
+        - method:
+          - CAVER strict proposal-mainline
+        - seed:
+          - `7`
+        - start:
+          - `2026-04-16 14:36:43` America/Edmonton
+        - walltime:
+          - `08:30:00`
+        - scheduler upper bound:
+          - `2026-04-16 23:06:43` America/Edmonton
+        - early health:
+          - lagged round `1/2` launched
+          - GE-Sim live summary provider active
+          - exact payload path active
+          - seeded MLP proxy and DR calibrator injected from round start
+      - `6012`:
+        - method:
+          - CAVER strict proposal-mainline
+        - seed:
+          - `13`
+        - start:
+          - `2026-04-16 14:36:44` America/Edmonton
+        - walltime:
+          - `08:30:00`
+        - scheduler upper bound:
+          - `2026-04-16 23:06:44` America/Edmonton
+        - early health:
+          - lagged round `1/2` launched
+          - GE-Sim live summary provider active
+          - exact payload path active
+          - seeded MLP proxy and DR calibrator injected from round start
+      - `6013`:
+        - method:
+          - CAVER strict proposal-mainline
+        - seed:
+          - `29`
+        - start:
+          - `2026-04-16 14:36:44` America/Edmonton
+        - walltime:
+          - `08:30:00`
+        - scheduler upper bound:
+          - `2026-04-16 23:06:44` America/Edmonton
+        - early health:
+          - lagged round `1/2` launched
+          - GE-Sim live summary provider active
+          - exact payload path active
+          - seeded MLP proxy and DR calibrator injected from round start
+    - replacement held-out post-train and evaluation jobs submitted with dependencies:
+      - `6014`:
+        - method:
+          - real-only held-out
+        - seed:
+          - `7`
+        - dependency:
+          - `afterok:6008`
+      - `6015`:
+        - method:
+          - real-only held-out
+        - seed:
+          - `13`
+        - dependency:
+          - `afterok:6009`
+      - `6016`:
+        - method:
+          - real-only held-out
+        - seed:
+          - `29`
+        - dependency:
+          - `afterok:6010`
+      - `6017`:
+        - method:
+          - CAVER held-out
+        - seed:
+          - `7`
+        - dependency:
+          - `afterok:6011`
+      - `6018`:
+        - method:
+          - CAVER held-out
+        - seed:
+          - `13`
+        - dependency:
+          - `afterok:6012`
+      - `6019`:
+        - method:
+          - CAVER held-out
+        - seed:
+          - `29`
+        - dependency:
+          - `afterok:6013`
+      - held-out backend:
+        - `exact_offline_nft`
+      - held-out walltime cap:
+        - `08:00:00`
+    - revised finish window for the active strict-mainline `budget=50` Stage-E cell:
+      - online real-only jobs should finish no later than:
+        - `2026-04-16 19:36:44` America/Edmonton
+      - online CAVER jobs should finish no later than:
+        - `2026-04-16 23:06:44` America/Edmonton
+      - if each held-out job starts immediately after its dependency clears, the conservative scheduler upper bounds are:
+        - real-only held-out by about `2026-04-17 03:36:44` America/Edmonton
+        - CAVER held-out by about `2026-04-17 07:06:44` America/Edmonton
+      - practical completion criterion:
+        - `6008` to `6013` complete cleanly
+        - `6014` to `6019` complete cleanly
+        - then summarize the strict-mainline `budget=50` 3-seed comparison and decide whether Stage E can be frozen
+  - second recovery pass landed on `2026-04-16` after `6008` to `6013` failed again:
+    - new shared root cause:
+      - the online reruns were still writing run artifacts and runtime logs to repo-local paths under `/projects/p57098/euijin1/Caver`
+      - direct write checks on the repo root and repo-local `runs/` failed with:
+        - `No space left on device`
+      - concrete evidence:
+        - `df -h /projects/p57098/euijin1/Caver` reported `0` available on the path-local mount view
+        - `mktemp /projects/p57098/euijin1/Caver/.tmp.writecheck.XXXXXX` failed with `No space left on device`
+        - the failed online jobs had only managed to write partial chunk traces before exiting
+    - failure interpretation for the second wave:
+      - `6008`, `6009`, `6010`:
+        - real-only jobs made real online progress through multiple contexts, then died once repo-local output writes ran into ENOSPC
+      - `6011`, `6012`, `6013`:
+        - lagged CAVER jobs entered round `1/2`, wrote round-setup artifacts, then died under the same repo-local output-pressure condition
+      - `6014` to `6019`:
+        - dependent held-out jobs were left in `DependencyNeverSatisfied` and were cancelled
+    - remediation applied:
+      - deleted only the six failed partial run directories from repo-local `/projects/.../runs` to recover enough space for code edits
+      - switched the global defaults in:
+        - [scripts/common.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/common.sh)
+      - new defaults now resolve to:
+        - run root:
+          - `/rdss/p57098/euijin1/caver/runs`
+        - Slurm log root:
+          - `/rdss/p57098/euijin1/caver/logs/slurm`
+        - runtime log root:
+          - `/rdss/p57098/euijin1/caver/runtime_logs`
+      - syntax verification after the change:
+        - `bash -n scripts/common.sh`
+        - `bash -n scripts/slurm/submit_stage0_real_only_budget.sh`
+        - `bash -n scripts/slurm/submit_stage0_caver_lagged_budget.sh`
+      - dry-run verification after the change:
+        - Stage-E selection manifests now resolve under `/rdss/p57098/euijin1/caver/runtime_logs/stagee_manifests/...`
+        - budget submitters now create run directories under `/rdss/p57098/euijin1/caver/runs/...`
+        - Slurm stdout / stderr now resolve under `/rdss/p57098/euijin1/caver/logs/slurm/...`
+    - replacement online jobs submitted against RDSS-backed paths:
+      - `6021`:
+        - method:
+          - real-only strict proposal-mainline
+        - seed:
+          - `7`
+        - start:
+          - `2026-04-16 16:25:44` America/Edmonton
+        - walltime:
+          - `05:00:00`
+        - scheduler upper bound:
+          - `2026-04-16 21:25:44` America/Edmonton
+      - `6022`:
+        - method:
+          - real-only strict proposal-mainline
+        - seed:
+          - `13`
+        - start:
+          - `2026-04-16 16:25:47` America/Edmonton
+        - walltime:
+          - `05:00:00`
+        - scheduler upper bound:
+          - `2026-04-16 21:25:47` America/Edmonton
+      - `6023`:
+        - method:
+          - real-only strict proposal-mainline
+        - seed:
+          - `29`
+        - start:
+          - `2026-04-16 16:25:47` America/Edmonton
+        - walltime:
+          - `05:00:00`
+        - scheduler upper bound:
+          - `2026-04-16 21:25:47` America/Edmonton
+      - `6024`:
+        - method:
+          - CAVER strict proposal-mainline
+        - seed:
+          - `7`
+        - start:
+          - `2026-04-16 16:25:47` America/Edmonton
+        - walltime:
+          - `08:30:00`
+        - scheduler upper bound:
+          - `2026-04-17 00:55:47` America/Edmonton
+      - `6025`:
+        - method:
+          - CAVER strict proposal-mainline
+        - seed:
+          - `13`
+        - start:
+          - `2026-04-16 16:25:47` America/Edmonton
+        - walltime:
+          - `08:30:00`
+        - scheduler upper bound:
+          - `2026-04-17 00:55:47` America/Edmonton
+      - `6026`:
+        - method:
+          - CAVER strict proposal-mainline
+        - seed:
+          - `29`
+        - start:
+          - `2026-04-16 16:25:50` America/Edmonton
+        - walltime:
+          - `08:30:00`
+        - scheduler upper bound:
+          - `2026-04-17 00:55:50` America/Edmonton
+    - replacement held-out jobs reattached behind the new online wave:
+      - `6027`:
+        - real-only held-out seed `7`, dependency `afterok:6021`
+      - `6028`:
+        - real-only held-out seed `13`, dependency `afterok:6022`
+      - `6029`:
+        - real-only held-out seed `29`, dependency `afterok:6023`
+      - `6030`:
+        - CAVER held-out seed `7`, dependency `afterok:6024`
+      - `6031`:
+        - CAVER held-out seed `13`, dependency `afterok:6025`
+      - `6032`:
+        - CAVER held-out seed `29`, dependency `afterok:6026`
+    - early health of the new RDSS-backed wave:
+      - `sacct` now resolves all six online jobs' `StdOut` / `StdErr` under `/rdss/p57098/euijin1/caver/logs/slurm/...`
+      - policy-server runtime logs now resolve under `/rdss/p57098/euijin1/caver/runtime_logs/bridge/...`
+      - lagged CAVER subround commands now point `--manifest-path` and `--results-dir` at `/rdss/...`
+    - updated finish window for the active strict-mainline `budget=50` cell:
+      - online real-only by about:
+        - `2026-04-16 21:25:47` America/Edmonton
+      - online CAVER by about:
+        - `2026-04-17 00:55:50` America/Edmonton
+      - held-out real-only by about:
+        - `2026-04-17 05:25:47` America/Edmonton
+      - held-out CAVER by about:
+        - `2026-04-17 08:55:50` America/Edmonton
+  - GE-Sim visual comparison was rechecked on `2026-04-16` after the first short clip looked static:
+    - previous artifact diagnosis:
+      - old clip:
+        - `/projects/p57098/euijin1/Caver/runs/stagee__gesim-trace-compare__block_to_tray_q001__seed29__budget50__20260416T074213Z/results/gesim_vs_libero_future.mp4`
+      - source GE-Sim tensor for that clip had:
+        - `4` frames only
+      - measured GE-Sim frame-to-frame motion for that selected `q001` bundle:
+        - head `0.0`
+        - hand_right `0.0`
+        - hand_left `0.0`
+      - logged LIBERO future on the same trace record was not static:
+        - head mean frame absdiff about `2.246`
+        - wrist mean frame absdiff about `6.443`
+      - conclusion:
+        - the original short clip was genuinely showing a static GE-Sim prediction for that specific query, not a renderer bug
+    - new targeted reruns across the same context:
+      - context:
+        - `block_to_tray_proxy__libero_90__task57__init011`
+      - trace:
+        - `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T071306Z/results/lagged_rounds/round_001/caver_online_chunks.jsonl`
+      - rerun root:
+        - `/rdss/p57098/euijin1/caver/runtime_logs/gesim_trace_long_compare__20260416T224019Z`
+      - helper launcher:
+        - [scripts/stagee/rerun_gesim_trace_queries.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/rerun_gesim_trace_queries.sh)
+      - completed query motion summaries observed before stopping the rerun job:
+        - `q001`:
+          - head `0.000`
+          - wrist `0.000`
+        - `q008`:
+          - head `1.414`
+          - wrist `3.040`
+        - `q016`:
+          - head `1.472`
+          - wrist `2.434`
+        - `q024`:
+          - head `1.132`
+          - wrist `5.198`
+        - `q032`:
+          - head `0.439`
+          - wrist `2.101`
+      - cross-query GE-Sim first-frame motion across the stitched set `q001,q008,q016,q024,q032`:
+        - head mean absdiff across adjacent query starts about `5.729`
+        - hand_right mean absdiff across adjacent query starts about `16.592`
+      - implication:
+        - even when one local 4-frame future is static, GE-Sim predictions still move across trajectory state as the rollout advances
+    - corrected single-query comparison artifact:
+      - query:
+        - `24`
+      - static overview:
+        - `/rdss/p57098/euijin1/caver/runtime_logs/gesim_trace_long_compare__20260416T224019Z/query_024/gesim_vs_libero_future_q024.png`
+      - animation:
+        - `/rdss/p57098/euijin1/caver/runtime_logs/gesim_trace_long_compare__20260416T224019Z/query_024/gesim_vs_libero_future_q024.gif`
+        - `/rdss/p57098/euijin1/caver/runtime_logs/gesim_trace_long_compare__20260416T224019Z/query_024/gesim_vs_libero_future_q024.mp4`
+      - video metadata:
+        - `4` frames
+        - duration about `2.4` seconds
+      - renderer used:
+        - [scripts/stagee/render_gesim_trace_future_animation.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/render_gesim_trace_future_animation.py)
+    - new longer stitched trajectory comparison artifact:
+      - query set:
+        - `1,8,16,24,32`
+      - animation:
+        - `/rdss/p57098/euijin1/caver/runtime_logs/gesim_trace_long_compare__20260416T224019Z/gesim_vs_libero_long_trajectory_q001_q032.gif`
+        - `/rdss/p57098/euijin1/caver/runtime_logs/gesim_trace_long_compare__20260416T224019Z/gesim_vs_libero_long_trajectory_q001_q032.mp4`
+      - video metadata:
+        - GIF frames `20`
+        - MP4 duration about `8.85` seconds
+        - MP4 size `706x824`
+      - renderer used:
+        - [scripts/stagee/render_gesim_trace_long_trajectory.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/render_gesim_trace_long_trajectory.py)
+      - interpretation:
+        - this stitched clip is the better artifact for longer movement inspection because it spans multiple executed query points from the same rollout rather than a single short 4-frame prediction
+
+- lagged CAVER finalizer recovery update on `2026-04-17`:
+  - failed jobs identified:
+    - `6042`, `6044`, `6046`
+      - all three were lagged CAVER resume/finalizer jobs for seeds `7`, `13`, `29` at budget `50`
+      - each job had already completed both lagged online rounds and written the top-level merged online artifacts before failing
+    - dead dependent jobs canceled:
+      - `6043`
+      - `6045`
+      - `6047`
+  - root cause:
+    - the failure was not in online CAVER collection, selector logic, admission, DR dataset creation, or calibrator fitting
+    - it happened in the final smoke backend update launched through [run_stage0_seed_warm_start_smoke.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh)
+    - the failing resume jobs had been submitted on `2` GPUs, but the smoke backend command still requested:
+      - `--train-envs 1`
+      - `--eval-envs 1`
+    - RLinf then failed validation with:
+      - `AssertionError: Total number of parallel environments for training must be divisible by the number of environment processes`
+  - fix applied in code:
+    - [scripts/common.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/common.sh)
+      - now exposes helper functions to parse Slurm GPU-count env vars robustly
+    - [scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/pistepnft/run_stage0_seed_warm_start_smoke.sh)
+      - now auto-aligns `train_envs` and `eval_envs` upward to the allocated GPU count when RLinf would otherwise see more accelerators than requested envs
+    - [scripts/pistepnft/run_stage0_demo_training.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/pistepnft/run_stage0_demo_training.sh)
+      - same auto-alignment logic applied for held-out post-train jobs
+    - [scripts/slurm/submit_stage0_caver_budget.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_budget.sh)
+      - when `--gpus > 1` and env counts are not explicitly provided, manifests now default `train_envs` and `eval_envs` to the GPU count
+    - [scripts/slurm/submit_stage0_caver_lagged_budget.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_lagged_budget.sh)
+      - same default normalization for future lagged proposal-mainline launches
+  - recovery action launched on `2026-04-17 09:13` America/Edmonton:
+    - resumed the three lagged wrappers in `--resume-existing --cleanup-incomplete-rounds` mode so they reuse completed round directories and only redo the cheap merged finalizer path
+    - new recovery jobs:
+      - `6054`:
+        - seed `7`
+        - run root `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260416T222546Z`
+        - walltime `03:00:00`
+        - scheduler upper bound about `2026-04-17 12:13` America/Edmonton
+      - `6055`:
+        - seed `13`
+        - run root `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget50__20260416T222546Z`
+        - walltime `03:00:00`
+        - scheduler upper bound about `2026-04-17 12:13` America/Edmonton
+      - `6056`:
+        - seed `29`
+        - run root `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T222547Z`
+        - walltime `03:00:00`
+        - scheduler upper bound about `2026-04-17 12:13` America/Edmonton
+    - scheduling choice:
+      - all three recovery jobs were relaunched on single `gpu-l40s` allocations
+      - rationale:
+        - the expensive online rounds are already complete, so the resume path no longer needs the original two-GPU GE-Sim/OpenPI online allocation
+        - single-GPU recovery avoids the old multi-GPU RLinf validation shape entirely while still exercising the patched backend path
+  - live status snapshot at `2026-04-17 09:25` America/Edmonton:
+    - `6054`, `6055`, and `6056` are all still `RUNNING`
+    - they have already advanced past the earlier immediate failure location:
+      - the wrapper reused both lagged rounds successfully
+      - the top-level finalizer entered `run_stage0_caver_round.sh --skip-online`
+      - selector/admission artifacts were reused and DR/demo rebuild started normally
+    - no repeat of the old `Total number of parallel environments` assertion has appeared in the resumed logs so far
+  - completion update after the recovery jobs finished:
+    - `6054`, `6055`, `6056`:
+      - all `COMPLETED`, exit `0:0`
+      - elapsed:
+        - `6054`: `00:47:44`
+        - `6055`: `00:47:25`
+        - `6056`: `00:48:16`
+      - all three now have:
+        - top-level `caver_round_summary.json`
+        - `rlinf_logs/training_completed.marker`
+      - practical consequence:
+        - the lagged CAVER online/finalizer side is now clean through backend smoke training for all three seeds at budget `50`
+        - the remaining Stage-E gate for this budget cell is the held-out exact NFT post-train/eval wave
+  - next wave launched on `2026-04-17 11:39:38` America/Edmonton:
+    - held-out CAVER post-train/eval jobs:
+      - `6057`:
+        - source round `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260416T222546Z/results`
+      - `6058`:
+        - source round `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget50__20260416T222546Z/results`
+      - `6059`:
+        - source round `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T222547Z/results`
+    - scheduler details:
+      - partition `gpu-h200`
+      - GPUs `1 x h200` each
+      - walltime `08:00:00`
+      - start `2026-04-17 11:39:38` America/Edmonton
+      - scheduler upper bound about `2026-04-17 19:39:38` America/Edmonton
+    - rationale for H200:
+      - this is the exact NFT held-out path with post-train conversion, export, and `T_val_S0` plus `T_test_S0` evaluation
+      - the H200 path has been the more reliable one-GPU resource for this long, memory-heavier Stage-E held-out step
+    - current status checked at `2026-04-17 11:39:45` America/Edmonton:
+      - `6057`, `6058`, and `6059` are all `RUNNING` on `h200-01`
+  - completion update after the held-out CAVER jobs finished:
+    - `6057`, `6058`, `6059`:
+      - all `COMPLETED`, exit `0:0`
+      - elapsed:
+        - `6057`: `03:57:04`
+        - `6058`: `03:52:07`
+        - `6059`: `03:56:45`
+    - held-out CAVER results at budget `50`:
+      - seed `7`:
+        - validation `0.21`
+        - test `0.22`
+      - seed `13`:
+        - validation `0.19`
+        - test `0.22`
+      - seed `29`:
+        - validation `0.20`
+        - test `0.23`
+      - mean across seeds:
+        - validation `0.200`
+        - test `0.223`
+    - online / data-use summary for lagged CAVER:
+      - online success:
+        - seed `7`: `0.40`
+        - seed `13`: `0.38`
+        - seed `29`: `0.38`
+        - mean `0.387`
+      - admitted contexts:
+        - `10 / 50` for each seed
+      - demo items written:
+        - mean about `338`
+      - primitive steps:
+        - mean about `1338`
+    - matched real-only reference at budget `50`:
+      - held-out real-only mean:
+        - validation `0.203`
+        - test `0.213`
+      - online real-only mean:
+        - `0.400`
+      - real-only demo size:
+        - mean about `3807` demo items
+        - mean about `15194` primitive steps
+    - interpretation:
+      - at this budget, lagged CAVER does not beat real-only on online success
+      - held-out validation is essentially tied
+      - held-out test is slightly higher for lagged CAVER (`0.223` vs `0.213`)
+      - the main positive result is sample-efficiency:
+        - comparable held-out performance after executing only about `10 / 50` admitted contexts
+        - roughly `11x` fewer demo items and primitive steps than the real-only baseline
+    - Stage-E implication:
+      - the strict proposal-mainline budget-`50` simulation comparison is now complete end to end
+      - this supports a simulation-stage sample-efficiency claim more naturally than a dominant absolute-success-rate claim

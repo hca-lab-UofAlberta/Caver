@@ -7,6 +7,7 @@
 \usepackage{amsmath,amssymb,mathtools,bm}
 \usepackage{amsthm}
 \usepackage{booktabs,tabularx,array,multirow,longtable}
+\usepackage{graphicx}
 \usepackage{listings,xcolor}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
@@ -52,20 +53,20 @@
 \newcommand{\softmax}{\mathop{\mathrm{softmax}}}
 \newcommand{\argmax}{\mathop{\mathrm{argmax}}}
 
-\title{\textbf{CAVER: Calibrated Active Verification for Real-Interaction Post-Training of Vision-Language-Action Policies}\\[0.35em]
-\large Interface-general method specification with concrete Stage-0 LIBERO and Stage-1 PiPER instantiations}
+\title{\textbf{CAVER: Calibrated Active Verification for Sample-Efficient Post-Training of Vision-Language-Action Policies}\\[0.35em]
+\large Simulation-first Stage-0 LIBERO results with a planned transfer to PiPER}
 \author{}
-\date{March 2026}
+\date{April 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-This proposal studies one practical question in VLA post-training: when only a small number of real robot executions can be trusted, how should those executions be spent so that a policy improves reliably? Recent work shows that real post-training can help, world models can cheaply generate large numbers of imagined futures, and flow-based VLA backbones such as $\pi_{0.5}$ are attractive but awkward for standard policy-gradient RL because action likelihoods are not directly available in the usual way \citep{tan2025riptvla,wang2026pistepnft,chen2025pirl,jiang2026wovr}. CAVER is therefore written at two levels. At the \emph{method level}, it is interface-general: it assumes only (i) a deterministic execution adapter $\Gamma_{\mathrm{exec}}$ that maps raw backbone chunks into a safety-checkable execution space, (ii) a provider adapter $\Phi_{\Omega}$ that maps execution chunks into the frozen provider's conditioning format, (iii) a deterministic safety shield $S_{\mathrm{safe}}$, and (iv) a verified labeler $M_{\mathrm{task}}$ that maps an executed episode to a trusted outcome. At the \emph{implementation level}, this proposal pins one staged study on the pretrained $\pi_{0.5}$ backbone from \texttt{openpi} and frozen GE-Sim from Genie Envisioner, with Stage 0 trusted execution in LIBERO simulation and Stage 1 real execution on PiPER \citep{liao2025genie,genierepo2026}.
+This paper studies one practical question in VLA post-training: when only a small number of trusted executions can be afforded, how should those executions be spent so that a policy improves reliably? CAVER is written at two levels. At the \emph{method level}, it is interface-general: it assumes only (i) a deterministic execution adapter $\Gamma_{\mathrm{exec}}$ that maps raw backbone chunks into a safety-checkable execution space, (ii) a provider adapter $\Phi_{\Omega}$ that maps execution chunks into the frozen provider's conditioning format, (iii) a deterministic safety shield $S_{\mathrm{safe}}$, and (iv) a verified labeler $M_{\mathrm{task}}$ that maps an executed episode to a trusted outcome. At the \emph{implementation level}, we pin one staged study on the pretrained $\pi_{0.5}$ backbone from \texttt{openpi}, frozen GE-Sim from Genie Envisioner, Stage 0 trusted execution in LIBERO simulation, and a planned Stage 1 real transfer on PiPER \citep{liao2025genie,genierepo2026}.
 
-Within that general interface, the paper makes two more locked choices. First, the real-only update backend is a $\pi$-StepNFT-style executed-trajectory objective, not PPO or critic-heavy Q-learning \citep{wang2026pistepnft}. Second, the selector architecture is fixed after Stage 0; only its utility inputs are refreshed round-by-round through a doubly robust calibrator. At each decision context, $\pi_{0.5}$ proposes $K$ action chunks. A frozen provider predicts a short-horizon future for each chunk, and a small proxy head trained only on Stage-0 simulation and a seed real dataset produces a cheap utility estimate. A stochastic selector chooses one candidate for trusted execution from the safety-approved subset and logs its exact propensity. Every method shares the same deterministic pre-execution safety shield, so unsafe chunks are rejected before they can reach the trusted execution environment. The resulting trusted binary outcome is then converted into doubly robust pseudo-outcomes for \emph{all safety-approved} candidates in that context using the logged propensity and the lagged nuisance model. A lagged calibrator converts cheap features into a corrected utility mean and scale. Only \emph{executed and confident} trajectories are then passed to the post-training backend. Cheap imagined candidates never directly update the backbone in the main paper. Whenever the paper compares calibration across methods, it does so through a common post-hoc diagnostic predictor rather than through each method's native online confidence output.
+Within that interface, the paper makes two more locked choices. First, the update backend is a $\pi$-StepNFT-style executed-trajectory objective, not PPO or critic-heavy Q-learning \citep{wang2026pistepnft}. Second, the selector architecture is fixed after Stage 0; only its utility inputs are refreshed round-by-round through a lagged doubly robust calibrator. At each decision context, $\pi_{0.5}$ proposes $K=4$ action chunks of horizon $H=4$. A frozen provider predicts a short-horizon future for each chunk, a three-head MLP proxy trained on Stage-0 tuples supplies a cheap utility prior, and a stochastic selector chooses one safe candidate for trusted execution while logging its exact propensity. The resulting binary outcome is turned into candidate-level doubly robust pseudo-outcomes for all safety-approved candidates, and only executed trajectories that clear a conservative admission rule are passed to the unchanged backend.
 
-The proposal is intentionally narrow. Its novelty claim is not that doubly robust estimation itself is new, and not that CAVER is a new end-to-end RL optimizer. The claim is that an \emph{online selective-verification layer} --- exact-propensity candidate selection, real-outcome correction, and conservative admission into an otherwise unchanged executed-sample backend --- can make a fixed flow-based VLA post-training stack more sample-efficient under the same verified real budget. The primary comparisons are therefore: (i) real-only $\pi$-StepNFT on the same $\pi_{0.5}$ backbone, (ii) the world-model-heavy WoVR baseline through RLinf, and (iii) attribution-focused ablations under exactly the same real-rollout budget \citep{jiang2026wovr,yu2025rlinf}. The intended paper is a carefully controlled one-robot, three-task real-budget study with an interface-general method statement, not a claim about all robots or all RL backends.
+The current completed empirical result is the strict proposal-mainline Stage-0 LIBERO comparison at budget $N=50$ over three seeds. Lagged CAVER reaches held-out validation/test success of $0.200/0.223$ versus $0.203/0.213$ for the real-only baseline, while online success is slightly lower ($0.387$ versus $0.400$). The important difference is data use: CAVER admits only $338$ demo items and $1338$ primitive steps on average, whereas the real-only baseline passes $3807$ demo items and $15194$ primitive steps into the same backend. The current claim is therefore deliberately narrow: CAVER is supported as a \emph{sample-efficiency layer} around a fixed flow-based post-training stack, not as a dominant raw-success replacement for real-only fine-tuning.
 \end{abstract}
 
 
@@ -99,22 +100,22 @@ World-model baseline & WoVR via RLinf & Gives the strongest world-model-heavy co
 \section{Introduction}
 World models, verifier scores, and large VLA backbones have made it easy to generate many candidate robot behaviors together with cheap predicted futures and cheap reward-like signals. At the same time, recent post-training work keeps returning to the same bottleneck: the hard part is not producing \emph{more} feedback, but producing feedback that is trustworthy enough to update the policy \citep{tan2025riptvla,jiang2026wovr,li2025worldmodelbench}. World-VLA-Loop, WoVR, TGRPO, NORA-1.5, and VLA-RFT all illustrate versions of the same tension. Learned simulators and reward proxies can provide scale, but simulator hallucination, compounding error, sparse success labels, and proxy exploitation make naive optimization brittle \citep{liu2026worldvlaloop,jiang2026wovr,chen2025tgrpo,hung2025nora15,li2025vlarft}.
 
-This proposal takes that tension as the central problem. Let $M$ be a large pool of cheap imagined or proxy-scored candidates, and let $N \ll M$ be a much smaller set of verified real robot executions. The scientific question is not ``which reward function should we use?'' It is: \emph{how should a small real verification budget be allocated and converted into a reliable policy-improvement signal?}
+This paper takes that tension as the central problem. Let $M$ be a large pool of cheap imagined or proxy-scored candidates, and let $N \ll M$ be a much smaller set of verified real robot executions. The scientific question is not ``which reward function should we use?'' It is: \emph{how should a small real verification budget be allocated and converted into a reliable policy-improvement signal?}
 
-The theory in this proposal is deliberately narrow. It justifies a \emph{context-level} verification rule conditional on the stream of decision contexts that actually occurs; it does not claim a full episodic policy-improvement guarantee after online backbone updates.
+The theory here is deliberately narrow. It justifies a \emph{context-level} verification rule conditional on the stream of decision contexts that actually occurs; it does not claim a full episodic policy-improvement guarantee after online backbone updates.
 
 This question is especially sharp for flow-based VLAs. The current public \texttt{openpi} implementation supports $\pi_{0.5}$ with a flow-matching action head. Flow-based action generation makes standard likelihood-ratio RL awkward, critic learning can be heavy, and a practical first-paper route is a critic-free, likelihood-free executed-trajectory update such as $\pi$-StepNFT \citep{openpi2026repo,wang2026pistepnft}. Accordingly, the method keeps the backbone fixed at $\pi_{0.5}$ and keeps the executed-update backend close to that path rather than turning the proposal into a new flow-RL optimizer paper.
 
 A second key design choice is to treat the world model as a \emph{frozen provider} rather than a new training target. The mainline method therefore uses a frozen off-the-shelf provider, with GE-Sim from Genie Envisioner as the primary choice because the public repository exposes code, released weights for GE-Sim, and example inference scripts that consume images, camera intrinsics/extrinsics, and action arrays \citep{liao2025genie,genierepo2026}. This keeps the contribution focused on verification and makes the approach transferable across backbones and world models.
 
-Finally, the proposal is positioned to be publishable because the claim is deliberately modest. CAVER is not presented as a new end-to-end RL algorithm for all flow-based VLAs. It is a \emph{training-time selective-verification layer}. Relative to ALOE, which studies action-level off-policy evaluation from logged VLA data, CAVER adds an online data-collection decision: it chooses which cheap candidate to verify in the first place, then uses that verified outcome to decide which executed trajectories deserve an update \citep{yang2026aloe}. Relative to WoVR and World-VLA-Loop, CAVER does not ask the world model to become increasingly reliable through policy/world co-training; it instead treats the world model as fallible and spends real interaction only where it is most valuable \citep{jiang2026wovr,liu2026worldvlaloop}. Relative to real-only post-training, it asks whether the same real budget can be used more intelligently. That is a concrete, testable, and publishable contribution.
+Finally, the paper is positioned as publishable because the claim is deliberately modest. CAVER is not presented as a new end-to-end RL algorithm for all flow-based VLAs. It is a \emph{training-time selective-verification layer}. Relative to ALOE, which studies action-level off-policy evaluation from logged VLA data, CAVER adds an online data-collection decision: it chooses which cheap candidate to verify in the first place, then uses that verified outcome to decide which executed trajectories deserve an update \citep{yang2026aloe}. Relative to WoVR and World-VLA-Loop, CAVER does not ask the world model to become increasingly reliable through policy/world co-training; it instead treats the world model as fallible and spends real interaction only where it is most valuable \citep{jiang2026wovr,liu2026worldvlaloop}. Relative to real-only post-training, it asks whether the same real budget can be used more intelligently. That is a concrete, testable, and publishable contribution.
 
 \paragraph{Contributions.}
 \begin{enumerate}
     \item A \textbf{problem formulation} for VLA post-training under limited real verification, in which a frozen off-the-shelf world-model provider produces cheap predicted futures while real execution supplies the trusted label.
     \item A \textbf{two-layer CAVER specification}: an interface-general method defined by an execution adapter, provider adapter, safety shield, and verified labeler, together with concrete Stage-0 LIBERO and Stage-1 PiPER instantiations.
     \item A \textbf{roundwise selective-verification algorithm} with exact feature definitions, exact selector behavior, exact roundwise data flow, explicit frozen-vs-trainable components, and an implemented-path update backend.
-    \item A \textbf{reproducible implementation and evaluation plan} using $\pi_{0.5}$, GE-Sim, PiPER, LIBERO, $\pi$-StepNFT, and WoVR/RLinf, with matched-budget baselines and a clear contingency plan if the primary provider integration stalls.
+    \item A \textbf{reproducible implementation and current Stage-0 result} using $\pi_{0.5}$, GE-Sim, LIBERO, and $\pi$-StepNFT, together with a clearly delimited Stage-1 PiPER transfer plan.
 \end{enumerate}
 
 \subsection*{Positioning against the nearest neighboring methods}
@@ -698,7 +699,7 @@ verified contexts are sufficient to certify an improvement margin $\Delta$.
 This theory is a \emph{conditional context-level} statement. It does \emph{not} prove monotonic improvement of the full VLA policy after LoRA updates, and it does \emph{not} control how earlier action choices change which future contexts are encountered. It proves something narrower and still useful: conditional on the realized stream of decision contexts, the real-verification decision layer can be evaluated and improved with principled uncertainty accounting even when only one candidate per context is actually executed.
 \end{remark}
 
-\section{Experimental plan}
+\section{Stage-0 results and Stage-1 plan}
 \subsection{Research questions}
 \textbf{RQ1.} Can a small number of verified real executions correct a much larger cheap pool of provider-based signals?
 
@@ -741,6 +742,31 @@ Before any Stage-0 sweep begins, fix four \emph{disjoint} template lists for eac
 \]
 The simulated seed list $\mathcal T^{\mathrm{seed}}_{\mathrm{S0}}$ contains the 24 warm-start contexts per task mentioned above. The validation list $\mathcal T^{\mathrm{val}}_{\mathrm{S0}}$ contains 20 held-out episodes per task and is used \emph{only} for the selector-selection score $J_{\mathrm{S0}}$ and checkpoint selection in Stage 0. The audit list $\mathcal T^{\mathrm{test}}_{\mathrm{S0}}$ contains 20 disjoint held-out episodes per task and is opened once only for final Stage-0 sanity plots. All budgeted Stage-0 online training contexts counted in $N$ are collected exclusively from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$. The proxy head $V_{\omega}$ may be fit only on executed tuples from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$ together with the shared Stage-1 real seed tuples; it may never use $\mathcal T^{\mathrm{val}}_{\mathrm{S0}}$ or $\mathcal T^{\mathrm{test}}_{\mathrm{S0}}$. The calibrator in Stage-0 dry runs may use only the simulated seed tuples plus accumulated training tuples from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$. Because GE-Sim is frozen in the mainline method, there is no Stage-0 provider-training split. The membership of every template ID in these four partitions is written to \texttt{manifest.lock} before the first Stage-0 sweep and is never changed mid-study.
 
+\subsection{Current Stage-0 mainline result}
+We now have one completed strict proposal-mainline comparison on the five Stage-0 LIBERO proxy families. The executed path uses the lagged selector, the seeded three-head MLP value proxy, the seeded DR calibrator MLP, GE-Sim provider summaries, exact offline rollout-batch export, and the unchanged executed-sample backend. The matched real-only baseline uses the same candidate protocol and the same backend, but with a uniform selector and without selective admission.
+
+Table~\ref{tab:stage0_mainline_results} and Figure~\ref{fig:stage0_mainline_results} summarize the completed budget-$50$ comparison over seeds $\{7,13,29\}$. The result does \emph{not} support a dominant raw-success claim: online success is slightly lower for CAVER ($0.387$ versus $0.400$), and held-out validation success is essentially tied ($0.200$ versus $0.203$). What it does support is the sample-efficiency claim that motivated CAVER in the first place. Held-out test success is slightly higher for CAVER ($0.223$ versus $0.213$) while the backend sees roughly $11.3\times$ fewer admitted demo items and $11.4\times$ fewer primitive steps.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Strict Stage-0 proposal-mainline comparison at budget $N=50$ on the five LIBERO proxy families. Values are mean $\pm$ population standard deviation over seeds $\{7,13,29\}$. \label{tab:stage0_mainline_results}}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+Method & Online & Held-out val & Held-out test & Admitted ctx & Demo items & Primitive steps \\
+\midrule
+CAVER & $0.387 \pm 0.009$ & $0.200 \pm 0.008$ & $\mathbf{0.223 \pm 0.005}$ & $10.0 \pm 0.0$ & $338 \pm 6$ & $1338 \pm 18$ \\
+Real-only & $\mathbf{0.400 \pm 0.000}$ & $\mathbf{0.203 \pm 0.012}$ & $0.213 \pm 0.005$ & $50.0 \pm 0.0$ & $3807 \pm 43$ & $15194 \pm 173$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{figures/stagee_mainline_budget50_summary.pdf}
+\caption{Current Stage-E mainline result. Left: held-out test success versus admitted demo items, with one point per seed and a star for the mean. Right: mean online, held-out validation, and held-out test success. The Stage-0 result is best read as a sample-efficiency result rather than a dominant online-success result. \label{fig:stage0_mainline_results}}
+\end{figure}
+
 \paragraph{Shared seed real set.}
 Before the matched-budget Stage-1 study, collect one common warm-start dataset of \textbf{120} PiPER decision contexts total, balanced as 40 contexts for each of the three physical Stage-1 tasks (block-to-tray, can-to-bowl, and stack). The seed set is collected with the initial $\pi_{0.5}$ backbone and a uniform random selector. Its allowed use is locked:
 \begin{itemize}
@@ -750,7 +776,7 @@ Before the matched-budget Stage-1 study, collect one common warm-start dataset o
 \end{itemize}
 No method may collect extra real interactions before the matched-budget curve starts. The shared seed set is therefore a \emph{common warm-start cost}, reported separately from the matched-budget training curves rather than silently folded into them.
 
-\subsection{Stage 1: three-task PiPER study}
+\subsection{Stage 1: planned three-task PiPER study}
 The real study uses exactly three tasks: block-to-tray, can-to-bowl, and two-block stack. Each Stage-1 training run is task-specific, each episode permits at most four decision contexts, and each round contains exactly $B_{\mathrm{round}}=25$ counted training contexts. Therefore the main \emph{training} budget curve $N\in\{25,50,100,200\}$ corresponds to exactly $R=N/25\in\{1,2,4,8\}$ rounds per task and per method, together with one mandatory $N=0$ seed-only anchor point that corresponds to the common seed-warmed checkpoint $\pi_{\theta_1}$ before any Stage-1 training. For the three main trainable methods (CAVER, real-only $\pi$-StepNFT, and WoVR), the study records two independent full training runs at every budget and a third independent run at $N=100$ as the primary stability point.
 
 \paragraph{Budget accounting rule.}
@@ -831,8 +857,10 @@ The main metrics are:
 \end{itemize}
 The continuous progress score $\bar Y$ is reported only as a diagnostic.
 
-\subsection{A publishability threshold}
-The project should be judged publishable only if it clears a concrete threshold. The paper is worth writing as a full methods paper if, at $N=100$, CAVER beats the real-only baseline on at least two of the three real tasks, beats or matches the world-model-heavy baseline on at least two of the three real tasks, clearly exceeds the $N=0$ seed-only anchor on the task-average success metric, and either (i) improves the \emph{common post-hoc} Brier score or ECE relative to the real-only baseline, or (ii) reaches the target success threshold $S^\star=0.70$ with fewer real training interactions on at least two of the three tasks. In addition, the mandatory attribution suite must show that the full CAVER configuration outperforms both the selection-only and admission-only ablations on task-average success at $N=100$, and the seed-size sweep must still show a positive gap over the seed-only anchor when results are plotted against $N_{\mathrm{total}}$. If those conditions are not met, the project should be reframed as an empirical negative-result or systems paper rather than oversold as a new learning method.
+\subsection{What the current Stage-0 result supports}
+The current Stage-0 result is strong enough to close the simulation-first mainline bring-up and carry the method forward to PiPER, but it supports a narrower story than a dominant-success-rate narrative. The right framing is that CAVER preserves held-out performance while materially reducing the amount of trusted executed data consumed by the unchanged backend. That framing is directly aligned with the motivating regime of scarce trusted execution.
+
+This matters for how the next stage should be judged. Stage 1 should test whether the same sample-efficiency pattern survives transfer to PiPER under the same candidate protocol, safety rules, and backend. If Stage 1 reproduces that pattern, the combined paper becomes stronger. If it does not, the Stage-0 result still stands as a concrete simulation-first selective-verification result and should not be rewritten into a false claim of raw success-rate dominance.
 
 \section{Concrete implementation plan: Stage-0 LIBERO and Stage-1 PiPER instantiations}
 This section pins two concrete instantiations of the abstract CAVER interfaces from the main method. Stage 0 is the simulation proxy study: LIBERO acts as the trusted execution environment, a LIBERO-specific execution adapter instantiates $\Gamma_{\mathrm{exec}}$, a LIBERO-to-GE-Sim bridge instantiates $\Phi_{\Omega}$, and the simulator task-success signal instantiates $M_{\mathrm{task}}$. Stage 1 is the real transfer study: the concrete execution adapter is denoted
@@ -1085,8 +1113,8 @@ The training/evaluation accounting is also fixed:
 \subsection{Contingency plan if GE-Sim integration fails early}
 The proposal should remain executable even if the primary provider is delayed. The contingency trigger is simple: if the team cannot produce stable short-horizon GE-Sim predictions on Stage-0 LIBERO trajectories by the end of week 4, freeze the current CAVER interface and temporarily substitute the lightweight local provider described in Appendix~\ref{app:contingency}. That contingency is \emph{not} the main claim and should be clearly labeled as such in the eventual paper.
 
-\section{Why this proposal is publishable}
-This proposal is publishable, if the experiments succeed, because it asks one narrow question, compares against strong matched baselines, and commits to a concrete implementation path. The paper should be framed as a selective-verification study for flow-based VLA post-training under strict matched real budgets, not as a fundamentally new RL algorithm.
+\section{Why the current paper claim is publishable}
+The current paper claim is publishable because it asks one narrow question, compares against strong matched baselines, and commits to a concrete implementation path. The paper should be framed as a selective-verification study for flow-based VLA post-training under strict matched real budgets, not as a fundamentally new RL algorithm.
 
 \textbf{Novelty relative to ALOE.} ALOE studies action-level off-policy evaluation from logged VLA behavior. CAVER differs by making the data-collection choice itself part of the method: it decides which cheap candidate to verify online, logs exact propensities, and then uses those verified outcomes to decide which executed trajectories deserve a policy update \citep{yang2026aloe}.
 
@@ -1094,13 +1122,13 @@ This proposal is publishable, if the experiments succeed, because it asks one na
 
 \textbf{Novelty relative to real-only post-training.} Real-only $\pi$-StepNFT asks how to update a flow-based VLA from executed trajectories. CAVER asks a different question: given the same real budget and the same executed-update backend, can better selection and correction collect \emph{more informative} executed trajectories \citep{wang2026pistepnft}? The main experimental burden is therefore attribution, which is why the paper requires the selection-only, admission-only, seed-size, utility-refresh, and proxy-target ablations.
 
-\textbf{Engineering realism.} The implementation uses public stacks that can actually be installed: openpi for $\pi_{0.5}$, GE-Sim for the frozen provider, LIBERO for the concrete Stage-0 simulation study, PiPER SDK/ROS for the concrete Stage-1 execution study, and RLinf for WoVR. The method is written with interface-general interfaces, but the present paper now pins both the simulation-first validation path and the later hardware transfer path so another lab can audit exactly what was run. The proposal also avoids unsupported claims about full online policy-gradient RL on the flow head and instead frames itself as a carefully controlled budgeted post-training study.
+\textbf{Engineering realism.} The implementation uses public stacks that can actually be installed: openpi for $\pi_{0.5}$, GE-Sim for the frozen provider, LIBERO for the concrete Stage-0 simulation study, PiPER SDK/ROS for the concrete Stage-1 execution study, and RLinf for WoVR. The method is written with interface-general interfaces, but the present paper now pins both the simulation-first validation path and the later hardware transfer path so another lab can audit exactly what was run. The paper also avoids unsupported claims about full online policy-gradient RL on the flow head and instead frames itself as a carefully controlled budgeted post-training study.
 
 
 \paragraph{Specific future extensions.} The most natural next steps are deliberately separated from the present claim. First, replace the executed-sample backend with a $\pi$RL-style Flow-SDE backend so that GRPO, PPO, or other true policy-gradient updates become feasible on $\pi_{0.5}$. Second, test whether two or more frozen providers improve robustness through disagreement-aware verification rather than a single GE-Sim predictor. Third, study learned selector policies and explicit safety monitors such as feature-based failure detectors. These are valuable follow-on projects, but excluding them from the main paper keeps the current proposal focused and testable.
 
 \section{Conclusion}
-CAVER asks one focused question that is both scientifically interesting and realistically executable: under the same real verification budget, can selective real execution plus doubly robust correction produce a better post-training signal for a flow-based VLA than either direct real-only updates or more direct trust in imagined world-model experience? The proposal answers that question with an interface-general verification layer defined through an execution adapter, provider adapter, safety shield, and verified labeler, then pins one exact implementation on Stage-0 LIBERO plus a Stage-1 PiPER study. That separation keeps the scientific claim at the interface level while making the present paper concrete enough to implement and audit as a carefully controlled one-robot budget study.
+CAVER asks one focused question that is both scientifically interesting and realistically executable: under the same trusted-execution budget, can selective execution plus doubly robust correction produce a better post-training signal for a flow-based VLA than direct real-only updates? The current strict Stage-0 LIBERO result answers that question positively in the sample-efficiency sense: CAVER reaches slightly better held-out test success than the matched real-only baseline while using about one eleventh as many admitted demo items and primitive steps in the unchanged backend. That is enough to close the simulation-first validation stage and justify the next PiPER transfer study, but it is not enough to justify a claim of dominant raw success. The paper should say exactly that.
 
 \appendix
 \section{Concrete operational definitions for the current $\pi_{0.5}$ + GE-Sim + PiPER instantiation}

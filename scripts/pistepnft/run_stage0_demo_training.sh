@@ -156,6 +156,21 @@ fi
 ensure_directory "${log_dir}"
 training_completed_marker="${log_dir}/training_completed.marker"
 training_completed_metadata="${log_dir}/training_completed.json"
+requested_train_envs="${train_envs}"
+requested_eval_envs="${eval_envs}"
+allocated_gpu_count="$(caver_allocated_gpu_count || true)"
+if [ -n "${allocated_gpu_count}" ] && [ "${allocated_gpu_count}" -gt 0 ]; then
+  if [ "${train_envs}" -lt "${allocated_gpu_count}" ]; then
+    printf 'info: auto-aligning train-envs from %s to allocated GPU count %s for RLinf placement validation\n' \
+      "${train_envs}" "${allocated_gpu_count}" >&2
+    train_envs="${allocated_gpu_count}"
+  fi
+  if [ "${eval_envs}" -lt "${allocated_gpu_count}" ]; then
+    printf 'info: auto-aligning eval-envs from %s to allocated GPU count %s for RLinf placement validation\n' \
+      "${eval_envs}" "${allocated_gpu_count}" >&2
+    eval_envs="${allocated_gpu_count}"
+  fi
+fi
 task_ids_override="[${task_ids}]"
 offline_demo_only_override="false"
 allow_demo_only_training_override="false"
@@ -247,6 +262,11 @@ printf '  experiment_name: %s\n' "${experiment_name}"
 printf '  data_path: %s\n' "${data_path}"
 printf '  data_type: %s\n' "${data_type}"
 printf '  algorithm_loss_type: %s\n' "${resolved_algorithm_loss_type:-<config-default>}"
+printf '  requested_train_envs: %s\n' "${requested_train_envs}"
+printf '  requested_eval_envs: %s\n' "${requested_eval_envs}"
+printf '  effective_train_envs: %s\n' "${train_envs}"
+printf '  effective_eval_envs: %s\n' "${eval_envs}"
+printf '  allocated_gpu_count: %s\n' "${allocated_gpu_count:-unknown}"
 
 if ((dry_run)); then
   exit 0

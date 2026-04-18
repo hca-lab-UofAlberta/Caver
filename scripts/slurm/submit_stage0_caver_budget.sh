@@ -16,11 +16,20 @@ Slurm options:
   --qos NAME                 Slurm QoS (default: normal)
   --gpu-type TYPE            GPU type specifier (default: l40s)
   --gpus COUNT               GPU count (default: 1)
-  --time LIMIT               Slurm time limit (default: 03:00:00)
+  --time LIMIT               Slurm time limit (default: 03:00:00; proposal-mainline bumps to 08:30:00)
   --cpus COUNT               CPU request (default: 8)
   --mem SIZE                 Memory request (default: 128G)
   --run-root PATH            Run directory root passed to the round submitter
   --log-root PATH            Slurm log root passed to the round submitter
+
+Execution-path options:
+  --proposal-mainline        Use the proposal-faithful Stage-E launch path:
+                             lagged rounds + GE-Sim live provider + exact OpenPI serving
+                             + exact rollout payloads + seeded MLP proxy/calibrator artifacts
+  --no-proposal-mainline     Disable the proposal-mainline bundle after it was enabled
+  --driver-mode NAME         single_round or lagged (default: single_round)
+  --trace-reference-mode NAME
+                             manifest or materialize for lagged trace merging (default: manifest)
 
 Selection options:
   --manifest-path PATH       Source Stage-0 manifest (default: metadata/stage0/libero_stage0_partitions.json)
@@ -104,6 +113,8 @@ cpus="8"
 mem="128G"
 run_root=""
 log_root=""
+gpus_explicit=0
+time_limit_explicit=0
 
 manifest_path="${CAVER_REPO_ROOT}/metadata/stage0/libero_stage0_partitions.json"
 partition_name="T_train_S0"
@@ -112,6 +123,11 @@ budget="25"
 family_offset="0"
 round_size="25"
 seed="7"
+
+proposal_mainline=0
+driver_mode="single_round"
+trace_reference_mode="manifest"
+driver_mode_explicit=0
 
 candidate_count="4"
 selection_policy="caver_heuristic"
@@ -123,9 +139,11 @@ resolution="256"
 libero_gl_backend="osmesa"
 max_env_steps=""
 server_mode="openpi-native"
+server_mode_explicit=0
 policy_config_name=""
 policy_pretrained_path=""
 exact_rollout_payload=0
+exact_rollout_payload_explicit=0
 exact_rlinf_config_name=""
 exact_action_chunk=""
 exact_no_nft_loss=0
@@ -137,8 +155,11 @@ exact_infer_mode="train"
 selector_mode="frozen_actionspace_softmax_v1"
 admission_policy="success_lcb_v1"
 value_proxy_model_path=""
+value_proxy_model_path_explicit=0
 dr_calibrator_model_path=""
+dr_calibrator_model_path_explicit=0
 provider_mode="none"
+provider_mode_explicit=0
 provider_bundle_root=""
 provider_gesim_timeout_sec="900"
 provider_gesim_prompt="best quality, consistent and smooth motion, realistic, clear and distinct."
@@ -149,6 +170,8 @@ model_path="/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-asset
 experiment_name="stage0_caver_budget"
 train_envs="1"
 eval_envs="1"
+train_envs_explicit=0
+eval_envs_explicit=0
 runner_max_steps="1"
 runner_max_epochs="1"
 rollout_steps="4"
@@ -183,10 +206,12 @@ while (($# > 0)); do
       ;;
     --gpus)
       gpus="${2:?missing value for --gpus}"
+      gpus_explicit=1
       shift 2
       ;;
     --time)
       time_limit="${2:?missing value for --time}"
+      time_limit_explicit=1
       shift 2
       ;;
     --cpus)
@@ -203,6 +228,23 @@ while (($# > 0)); do
       ;;
     --log-root)
       log_root="${2:?missing value for --log-root}"
+      shift 2
+      ;;
+    --proposal-mainline)
+      proposal_mainline=1
+      shift
+      ;;
+    --no-proposal-mainline)
+      proposal_mainline=0
+      shift
+      ;;
+    --driver-mode)
+      driver_mode="${2:?missing value for --driver-mode}"
+      driver_mode_explicit=1
+      shift 2
+      ;;
+    --trace-reference-mode)
+      trace_reference_mode="${2:?missing value for --trace-reference-mode}"
       shift 2
       ;;
     --manifest-path)
@@ -271,6 +313,7 @@ while (($# > 0)); do
       ;;
     --server-mode)
       server_mode="${2:?missing value for --server-mode}"
+      server_mode_explicit=1
       shift 2
       ;;
     --policy-config-name)
@@ -283,6 +326,7 @@ while (($# > 0)); do
       ;;
     --exact-rollout-payload)
       exact_rollout_payload=1
+      exact_rollout_payload_explicit=1
       shift
       ;;
     --exact-rlinf-config-name)
@@ -323,14 +367,17 @@ while (($# > 0)); do
       ;;
     --value-proxy-model-path)
       value_proxy_model_path="${2:?missing value for --value-proxy-model-path}"
+      value_proxy_model_path_explicit=1
       shift 2
       ;;
     --dr-calibrator-model-path)
       dr_calibrator_model_path="${2:?missing value for --dr-calibrator-model-path}"
+      dr_calibrator_model_path_explicit=1
       shift 2
       ;;
     --provider-mode)
       provider_mode="${2:?missing value for --provider-mode}"
+      provider_mode_explicit=1
       shift 2
       ;;
     --provider-bundle-root)
@@ -363,10 +410,12 @@ while (($# > 0)); do
       ;;
     --train-envs)
       train_envs="${2:?missing value for --train-envs}"
+      train_envs_explicit=1
       shift 2
       ;;
     --eval-envs)
       eval_envs="${2:?missing value for --eval-envs}"
+      eval_envs_explicit=1
       shift 2
       ;;
     --runner-max-steps)
@@ -447,6 +496,74 @@ if [ -n "${policy_config_name}" ] || [ -n "${policy_pretrained_path}" ]; then
   policy_pretrained_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${policy_pretrained_path}")"
 fi
 
+case "${driver_mode}" in
+  single_round|lagged)
+    ;;
+  *)
+    echo "error: unsupported --driver-mode ${driver_mode}; expected single_round or lagged" >&2
+    exit 1
+    ;;
+esac
+
+case "${trace_reference_mode}" in
+  manifest|materialize)
+    ;;
+  *)
+    echo "error: unsupported --trace-reference-mode ${trace_reference_mode}; expected manifest or materialize" >&2
+    exit 1
+    ;;
+esac
+
+if ((proposal_mainline)); then
+  if (( ! driver_mode_explicit )); then
+    driver_mode="lagged"
+  fi
+  if (( ! gpus_explicit )); then
+    gpus="2"
+  fi
+  if (( ! time_limit_explicit )); then
+    time_limit="08:30:00"
+  fi
+  if (( ! server_mode_explicit )); then
+    server_mode="openpi-exact"
+  fi
+  if (( ! exact_rollout_payload_explicit )); then
+    exact_rollout_payload=1
+  fi
+  if (( ! provider_mode_explicit )); then
+    provider_mode="gesim_live_summary"
+  fi
+  if (( ! value_proxy_model_path_explicit )); then
+    value_proxy_model_path="${CAVER_REPO_ROOT}/metadata/stage0/value_proxy/stage0_context_success_progress_sq_mlp3head_v2.json"
+  fi
+  if (( ! dr_calibrator_model_path_explicit )); then
+    dr_calibrator_model_path="${CAVER_REPO_ROOT}/metadata/stage0/calibrator/stage0_seed_dr_calibrator_mlp_v2.json"
+  fi
+fi
+
+if (( ! train_envs_explicit )) && [ "${gpus}" -gt 1 ]; then
+  train_envs="${gpus}"
+fi
+if (( ! eval_envs_explicit )) && [ "${gpus}" -gt 1 ]; then
+  eval_envs="${gpus}"
+fi
+
+if [ -n "${value_proxy_model_path}" ]; then
+  value_proxy_model_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${value_proxy_model_path}")"
+  if [ ! -f "${value_proxy_model_path}" ]; then
+    echo "error: value proxy model not found: ${value_proxy_model_path}" >&2
+    exit 1
+  fi
+fi
+
+if [ -n "${dr_calibrator_model_path}" ]; then
+  dr_calibrator_model_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${dr_calibrator_model_path}")"
+  if [ ! -f "${dr_calibrator_model_path}" ]; then
+    echo "error: DR calibrator model not found: ${dr_calibrator_model_path}" >&2
+    exit 1
+  fi
+fi
+
 ensure_directory "${CAVER_DEFAULT_RUNTIME_LOG_ROOT}/stagee_manifests"
 selection_stamp="$(timestamp_utc)"
 family_token="$(sanitize_token "${family_ids:-all}")"
@@ -501,48 +618,95 @@ print(json.loads(sys.argv[1])["backend_task_ids"])
 PY
 )"
 
-submit_cmd=(
-  "${CAVER_REPO_ROOT}/scripts/slurm/submit_stage0_caver_round.sh"
-  --partition "${partition}"
-  --qos "${qos}"
-  --gpu-type "${gpu_type}"
-  --gpus "${gpus}"
-  --time "${time_limit}"
-  --cpus "${cpus}"
-  --mem "${mem}"
-  --manifest-path "${selection_manifest}"
-  --partition-name "${partition_name}"
-  --max-contexts "${budget}"
-  --round-size "${round_size}"
-  --seed "${seed}"
-  --candidate-count "${candidate_count}"
-  --selection-policy "${selection_policy}"
-  --num-steps-wait "${num_steps_wait}"
-  --replan-steps "${replan_steps}"
-  --resize-size "${resize_size}"
-  --resolution "${resolution}"
-  --libero-gl-backend "${libero_gl_backend}"
-  --selector-mode "${selector_mode}"
-  --admission-policy "${admission_policy}"
-  --config-name "${config_name}"
-  --model-path "${model_path}"
-  --backend-task-suite "${backend_task_suite}"
-  --backend-task-ids "${backend_task_ids}"
-  --experiment-name "${experiment_name}"
-  --train-envs "${train_envs}"
-  --eval-envs "${eval_envs}"
-  --runner-max-steps "${runner_max_steps}"
-  --runner-max-epochs "${runner_max_epochs}"
-  --rollout-steps "${rollout_steps}"
-  --micro-batch "${micro_batch}"
-  --global-batch "${global_batch}"
-  --replay-capacity "${replay_capacity}"
-  --min-buffer-size "${min_buffer_size}"
-  --train-actor-steps "${train_actor_steps}"
-  --demo-output-mode "${demo_output_mode}"
-  --max-items-per-shard "${max_items_per_shard}"
-  --demo-format "${demo_format}"
-)
+submit_cmd=()
+if [ "${driver_mode}" = "lagged" ]; then
+  submit_cmd=(
+    "${CAVER_REPO_ROOT}/scripts/slurm/submit_stage0_caver_lagged_budget.sh"
+    --partition "${partition}"
+    --qos "${qos}"
+    --gpu-type "${gpu_type}"
+    --gpus "${gpus}"
+    --time "${time_limit}"
+    --cpus "${cpus}"
+    --mem "${mem}"
+    --trace-reference-mode "${trace_reference_mode}"
+    --manifest-path "${selection_manifest}"
+    --partition-name "${partition_name}"
+    --max-contexts "${budget}"
+    --round-size "${round_size}"
+    --seed "${seed}"
+    --candidate-count "${candidate_count}"
+    --selection-policy "${selection_policy}"
+    --num-steps-wait "${num_steps_wait}"
+    --replan-steps "${replan_steps}"
+    --resize-size "${resize_size}"
+    --resolution "${resolution}"
+    --libero-gl-backend "${libero_gl_backend}"
+    --selector-mode "${selector_mode}"
+    --admission-policy "${admission_policy}"
+    --config-name "${config_name}"
+    --model-path "${model_path}"
+    --backend-task-suite "${backend_task_suite}"
+    --backend-task-ids "${backend_task_ids}"
+    --experiment-name "${experiment_name}"
+    --train-envs "${train_envs}"
+    --eval-envs "${eval_envs}"
+    --runner-max-steps "${runner_max_steps}"
+    --runner-max-epochs "${runner_max_epochs}"
+    --rollout-steps "${rollout_steps}"
+    --micro-batch "${micro_batch}"
+    --global-batch "${global_batch}"
+    --replay-capacity "${replay_capacity}"
+    --min-buffer-size "${min_buffer_size}"
+    --train-actor-steps "${train_actor_steps}"
+    --demo-output-mode "${demo_output_mode}"
+    --max-items-per-shard "${max_items_per_shard}"
+    --demo-format "${demo_format}"
+  )
+else
+  submit_cmd=(
+    "${CAVER_REPO_ROOT}/scripts/slurm/submit_stage0_caver_round.sh"
+    --partition "${partition}"
+    --qos "${qos}"
+    --gpu-type "${gpu_type}"
+    --gpus "${gpus}"
+    --time "${time_limit}"
+    --cpus "${cpus}"
+    --mem "${mem}"
+    --manifest-path "${selection_manifest}"
+    --partition-name "${partition_name}"
+    --max-contexts "${budget}"
+    --round-size "${round_size}"
+    --seed "${seed}"
+    --candidate-count "${candidate_count}"
+    --selection-policy "${selection_policy}"
+    --num-steps-wait "${num_steps_wait}"
+    --replan-steps "${replan_steps}"
+    --resize-size "${resize_size}"
+    --resolution "${resolution}"
+    --libero-gl-backend "${libero_gl_backend}"
+    --selector-mode "${selector_mode}"
+    --admission-policy "${admission_policy}"
+    --config-name "${config_name}"
+    --model-path "${model_path}"
+    --backend-task-suite "${backend_task_suite}"
+    --backend-task-ids "${backend_task_ids}"
+    --experiment-name "${experiment_name}"
+    --train-envs "${train_envs}"
+    --eval-envs "${eval_envs}"
+    --runner-max-steps "${runner_max_steps}"
+    --runner-max-epochs "${runner_max_epochs}"
+    --rollout-steps "${rollout_steps}"
+    --micro-batch "${micro_batch}"
+    --global-batch "${global_batch}"
+    --replay-capacity "${replay_capacity}"
+    --min-buffer-size "${min_buffer_size}"
+    --train-actor-steps "${train_actor_steps}"
+    --demo-output-mode "${demo_output_mode}"
+    --max-items-per-shard "${max_items_per_shard}"
+    --demo-format "${demo_format}"
+  )
+fi
 
 if [ -n "${dependency}" ]; then
   submit_cmd+=(--dependency "${dependency}")
@@ -621,7 +785,7 @@ printf 'submit command:'
 printf ' %q' "${submit_cmd[@]}"
 printf '\n'
 
-python3 - "${selection_manifest}" "${selection_summary}" "${selection_info}" "${budget}" "${seed}" "${partition_name}" "${family_offset}" "${selector_mode}" "${admission_policy}" "${require_candidate_bank}" "${provider_mode}" "${provider_bundle_root}" "${provider_gesim_timeout_sec}" "${provider_gesim_prompt}" <<'PY'
+python3 - "${selection_manifest}" "${selection_summary}" "${selection_info}" "${budget}" "${seed}" "${partition_name}" "${family_offset}" "${selector_mode}" "${admission_policy}" "${require_candidate_bank}" "${provider_mode}" "${provider_bundle_root}" "${provider_gesim_timeout_sec}" "${provider_gesim_prompt}" "${proposal_mainline}" "${driver_mode}" "${trace_reference_mode}" "${server_mode}" "${exact_rollout_payload}" "${value_proxy_model_path}" "${dr_calibrator_model_path}" <<'PY'
 import json
 import pathlib
 import sys
@@ -642,6 +806,13 @@ summary = {
     "provider_bundle_root": sys.argv[12] or None,
     "provider_gesim_timeout_sec": int(sys.argv[13]),
     "provider_gesim_prompt": sys.argv[14],
+    "proposal_mainline": bool(int(sys.argv[15])),
+    "driver_mode": sys.argv[16],
+    "trace_reference_mode": sys.argv[17],
+    "server_mode": sys.argv[18],
+    "exact_rollout_payload": bool(int(sys.argv[19])),
+    "value_proxy_model_path": sys.argv[20] or None,
+    "dr_calibrator_model_path": sys.argv[21] or None,
     "selected_family_ids": selection_info["selected_family_ids"],
     "contexts_per_family": selection_info["contexts_per_family"],
     "backend_task_suite": selection_info["backend_task_suite"],

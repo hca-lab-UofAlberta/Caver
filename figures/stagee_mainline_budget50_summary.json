@@ -1,0 +1,176 @@
+{
+  "aggregate": {
+    "caver": {
+      "contexts_admitted": {
+        "mean": 10.0,
+        "stdev": 0.0
+      },
+      "contexts_covered": {
+        "mean": 10.0,
+        "stdev": 0.0
+      },
+      "contexts_rejected": {
+        "mean": 40.0,
+        "stdev": 0.0
+      },
+      "demo_items_written": {
+        "mean": 338.0,
+        "stdev": 5.715476066494082
+      },
+      "dr_calibrator_model_id": "stage0_seed_dr_calibrator_mlp_v2",
+      "online_success_rate": {
+        "mean": 0.3866666666666667,
+        "stdev": 0.009428090415820642
+      },
+      "primitive_steps_total": {
+        "mean": 1338.3333333333333,
+        "stdev": 17.82008853949821
+      },
+      "selector_mode": "lagged_dr_calibrated_softmax_v1",
+      "test_success_rate": {
+        "mean": 0.22333333333333336,
+        "stdev": 0.004714045207910321
+      },
+      "validation_success_rate": {
+        "mean": 0.20000000000000004,
+        "stdev": 0.008164965809277256
+      },
+      "value_proxy_model_id": "stage0_context_success_progress_sq_mlp3head_v2"
+    },
+    "real_only": {
+      "contexts_covered": {
+        "mean": 50.0,
+        "stdev": 0.0
+      },
+      "demo_items_written": {
+        "mean": 3807.0,
+        "stdev": 42.708313008125245
+      },
+      "online_success_rate": {
+        "mean": 0.4000000000000001,
+        "stdev": 0.0
+      },
+      "primitive_steps_total": {
+        "mean": 15194.0,
+        "stdev": 172.75030149515416
+      },
+      "test_success_rate": {
+        "mean": 0.21333333333333335,
+        "stdev": 0.004714045207910321
+      },
+      "validation_success_rate": {
+        "mean": 0.20333333333333334,
+        "stdev": 0.01247219128924647
+      }
+    }
+  },
+  "budget": 50,
+  "comparison": {
+    "budget": 50,
+    "demo_item_reduction_ratio": 11.263313609467456,
+    "online_success_delta": -0.013333333333333364,
+    "primitive_step_reduction_ratio": 11.352926525529266,
+    "test_success_delta": 0.010000000000000009,
+    "validation_success_delta": -0.0033333333333332993
+  },
+  "methods": {
+    "caver": [
+      {
+        "contexts_admitted": 10,
+        "contexts_covered": 10,
+        "contexts_rejected": 40,
+        "demo_items_written": 335,
+        "dr_calibrator_model_id": "stage0_seed_dr_calibrator_mlp_v2",
+        "label": "CAVER",
+        "method": "caver",
+        "online_success_rate": 0.4,
+        "posttrain_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260416T222546Z",
+        "primitive_steps_total": 1334,
+        "run_dir": "/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260416T222546Z",
+        "seed": 7,
+        "selector_mode": "lagged_dr_calibrated_softmax_v1",
+        "test_success_rate": 0.22,
+        "validation_success_rate": 0.21,
+        "value_proxy_model_id": "stage0_context_success_progress_sq_mlp3head_v2"
+      },
+      {
+        "contexts_admitted": 10,
+        "contexts_covered": 10,
+        "contexts_rejected": 40,
+        "demo_items_written": 333,
+        "dr_calibrator_model_id": "stage0_seed_dr_calibrator_mlp_v2",
+        "label": "CAVER",
+        "method": "caver",
+        "online_success_rate": 0.38,
+        "posttrain_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget50__20260416T222546Z",
+        "primitive_steps_total": 1319,
+        "run_dir": "/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget50__20260416T222546Z",
+        "seed": 13,
+        "selector_mode": "lagged_dr_calibrated_softmax_v1",
+        "test_success_rate": 0.22,
+        "validation_success_rate": 0.19,
+        "value_proxy_model_id": "stage0_context_success_progress_sq_mlp3head_v2"
+      },
+      {
+        "contexts_admitted": 10,
+        "contexts_covered": 10,
+        "contexts_rejected": 40,
+        "demo_items_written": 346,
+        "dr_calibrator_model_id": "stage0_seed_dr_calibrator_mlp_v2",
+        "label": "CAVER",
+        "method": "caver",
+        "online_success_rate": 0.38,
+        "posttrain_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T222547Z",
+        "primitive_steps_total": 1362,
+        "run_dir": "/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T222547Z",
+        "seed": 29,
+        "selector_mode": "lagged_dr_calibrated_softmax_v1",
+        "test_success_rate": 0.23,
+        "validation_success_rate": 0.2,
+        "value_proxy_model_id": "stage0_context_success_progress_sq_mlp3head_v2"
+      }
+    ],
+    "real_only": [
+      {
+        "contexts_covered": 50,
+        "demo_items_written": 3831,
+        "label": "Real-only",
+        "method": "real_only",
+        "online_success_rate": 0.4,
+        "posttrain_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget50__20260416T222544Z",
+        "primitive_steps_total": 15286,
+        "run_dir": "/rdss/p57098/euijin1/caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget50__20260416T222544Z",
+        "seed": 7,
+        "test_success_rate": 0.22,
+        "validation_success_rate": 0.2
+      },
+      {
+        "contexts_covered": 50,
+        "demo_items_written": 3747,
+        "label": "Real-only",
+        "method": "real_only",
+        "online_success_rate": 0.4,
+        "posttrain_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget50__20260416T222545Z",
+        "primitive_steps_total": 14952,
+        "run_dir": "/rdss/p57098/euijin1/caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget50__20260416T222545Z",
+        "seed": 13,
+        "test_success_rate": 0.21,
+        "validation_success_rate": 0.19
+      },
+      {
+        "contexts_covered": 50,
+        "demo_items_written": 3843,
+        "label": "Real-only",
+        "method": "real_only",
+        "online_success_rate": 0.4,
+        "posttrain_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget50__20260416T222545Z",
+        "primitive_steps_total": 15344,
+        "run_dir": "/rdss/p57098/euijin1/caver/runs/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget50__20260416T222545Z",
+        "seed": 29,
+        "test_success_rate": 0.21,
+        "validation_success_rate": 0.22
+      }
+    ]
+  },
+  "stage": "Stage E"
+}

@@ -215,7 +215,9 @@ fi
 
 ensure_directory "${CAVER_DEFAULT_RUNTIME_LOG_ROOT}/bridge"
 stamp="$(timestamp_utc)"
-server_log="${CAVER_DEFAULT_RUNTIME_LOG_ROOT}/bridge/policy_server__${stamp}.log"
+server_log_run_id="${CAVER_RUN_ID:-manual}"
+server_log_run_id="$(printf '%s' "${server_log_run_id}" | sed -E 's/[^A-Za-z0-9._-]+/-/g')"
+server_log="${CAVER_DEFAULT_RUNTIME_LOG_ROOT}/bridge/policy_server__${stamp}__${server_log_run_id}__p${port}__${$}.log"
 
 cleanup() {
   if [ -n "${server_pid:-}" ] && kill -0 "${server_pid}" >/dev/null 2>&1; then

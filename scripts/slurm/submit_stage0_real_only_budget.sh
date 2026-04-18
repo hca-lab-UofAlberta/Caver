@@ -16,11 +16,15 @@ Slurm options:
   --qos NAME                 Slurm QoS (default: normal)
   --gpu-type TYPE            GPU type specifier (default: l40s)
   --gpus COUNT               GPU count (default: 1)
-  --time LIMIT               Slurm time limit (default: 02:00:00)
+  --time LIMIT               Slurm time limit (default: 02:00:00; proposal-mainline bumps to 05:00:00)
   --cpus COUNT               CPU request (default: 8)
   --mem SIZE                 Memory request (default: 128G)
   --run-root PATH            Run directory root passed to the round submitter
   --log-root PATH            Slurm log root passed to the round submitter
+
+Execution-path options:
+  --proposal-mainline        Use the proposal-faithful real-only exact rollout path
+  --no-proposal-mainline     Disable the proposal-mainline bundle after it was enabled
 
 Selection options:
   --manifest-path PATH       Source Stage-0 manifest (default: metadata/stage0/libero_stage0_partitions.json)
@@ -85,7 +89,9 @@ cpus="8"
 mem="128G"
 run_root=""
 log_root=""
+time_limit_explicit=0
 
+proposal_mainline=0
 manifest_path="${CAVER_REPO_ROOT}/metadata/stage0/libero_stage0_partitions.json"
 partition_name="T_train_S0"
 family_ids=""
@@ -100,9 +106,11 @@ selector_seed=""
 libero_gl_backend="osmesa"
 max_env_steps=""
 server_mode="openpi-native"
+server_mode_explicit=0
 policy_config_name=""
 policy_pretrained_path=""
 exact_rollout_payload=0
+exact_rollout_payload_explicit=0
 exact_rlinf_config_name=""
 exact_action_chunk=""
 exact_no_nft_loss=0
@@ -154,6 +162,7 @@ while (($# > 0)); do
       ;;
     --time)
       time_limit="${2:?missing value for --time}"
+      time_limit_explicit=1
       shift 2
       ;;
     --cpus)
@@ -171,6 +180,14 @@ while (($# > 0)); do
     --log-root)
       log_root="${2:?missing value for --log-root}"
       shift 2
+      ;;
+    --proposal-mainline)
+      proposal_mainline=1
+      shift
+      ;;
+    --no-proposal-mainline)
+      proposal_mainline=0
+      shift
       ;;
     --manifest-path)
       manifest_path="${2:?missing value for --manifest-path}"
@@ -222,6 +239,7 @@ while (($# > 0)); do
       ;;
     --server-mode)
       server_mode="${2:?missing value for --server-mode}"
+      server_mode_explicit=1
       shift 2
       ;;
     --policy-config-name)
@@ -234,6 +252,7 @@ while (($# > 0)); do
       ;;
     --exact-rollout-payload)
       exact_rollout_payload=1
+      exact_rollout_payload_explicit=1
       shift
       ;;
     --exact-rlinf-config-name)
@@ -360,6 +379,18 @@ if [ -n "${policy_config_name}" ] || [ -n "${policy_pretrained_path}" ]; then
     exit 1
   fi
   policy_pretrained_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${policy_pretrained_path}")"
+fi
+
+if ((proposal_mainline)); then
+  if (( ! time_limit_explicit )); then
+    time_limit="05:00:00"
+  fi
+  if (( ! server_mode_explicit )); then
+    server_mode="openpi-exact"
+  fi
+  if (( ! exact_rollout_payload_explicit )); then
+    exact_rollout_payload=1
+  fi
 fi
 
 ensure_directory "${CAVER_DEFAULT_RUNTIME_LOG_ROOT}/stagee_manifests"
@@ -509,7 +540,7 @@ printf 'submit command:'
 printf ' %q' "${submit_cmd[@]}"
 printf '\n'
 
-python3 - "${selection_manifest}" "${selection_summary}" "${selection_info}" "${budget}" "${seed}" "${partition_name}" "${family_offset}" <<'PY'
+python3 - "${selection_manifest}" "${selection_summary}" "${selection_info}" "${budget}" "${seed}" "${partition_name}" "${family_offset}" "${proposal_mainline}" "${server_mode}" "${exact_rollout_payload}" <<'PY'
 import json
 import pathlib
 import sys
@@ -523,6 +554,9 @@ summary = {
     "seed": int(sys.argv[5]),
     "partition_name": sys.argv[6],
     "family_offset": int(sys.argv[7]),
+    "proposal_mainline": bool(int(sys.argv[8])),
+    "server_mode": sys.argv[9],
+    "exact_rollout_payload": bool(int(sys.argv[10])),
     "selected_family_ids": selection_info["selected_family_ids"],
     "contexts_per_family": selection_info["contexts_per_family"],
     "backend_task_suite": selection_info["backend_task_suite"],

@@ -29,9 +29,11 @@ As of `2026-04-13`:
   - seed artifact: `metadata/stage0/calibrator/stage0_seed_dr_calibrator_mlp_v2.json`
   - validation smoke: job `5887`
   - result: `COMPLETED`, `1/5` successes, selector mode `lagged_dr_calibrated_softmax_v1`, next-round calibrator fit succeeded
-- The remaining method gate before PiPER is the full lagged Stage-E path:
-  - provider -> DR dataset -> lagged calibrator -> refreshed next-round selector
-- The first explicit lagged validation run is job `5873`.
+- The strict proposal-mainline launch path is now encoded in the Stage-E budget submitters:
+  - `scripts/slurm/submit_stage0_caver_budget.sh --proposal-mainline`
+  - `scripts/slurm/submit_stage0_real_only_budget.sh --proposal-mainline`
+- The remaining gate before PiPER is empirical, not orchestration:
+  - rerun the Stage-E comparison under that proposal-mainline path and judge whether the simulation result is strong enough to freeze for transfer.
 
 If you want the detailed chronology, read:
 
@@ -242,6 +244,18 @@ scripts/slurm/submit_stage0_real_only_budget.sh \
   --gpu-type l40s
 ```
 
+Proposal-mainline real-only baseline:
+
+```bash
+scripts/slurm/submit_stage0_real_only_budget.sh \
+  --proposal-mainline \
+  --budget 25 \
+  --seed 7 \
+  --partition gpu-l40s \
+  --qos normal \
+  --gpu-type l40s
+```
+
 ### 4. Single-round provider-aware CAVER
 
 The current single-round provider-aware launcher is:
@@ -274,7 +288,31 @@ If you want the proposal-aligned round-1 seed-calibrator version, add:
 
 The reference validation for that path is job `5887`, which completed end to end on `gpu-l40s` with the seed calibrator loaded from round start.
 
-### 5. Explicit lagged Stage-E run
+### 5. Proposal-Mainline Stage-E CAVER
+
+The canonical proposal-mainline launcher is now:
+
+```bash
+scripts/slurm/submit_stage0_caver_budget.sh \
+  --proposal-mainline \
+  --budget 50 \
+  --seed 7 \
+  --partition gpu-l40s \
+  --qos normal \
+  --gpu-type l40s \
+  --run-root /rdss/p57098/${USER}/caver/runs \
+  --log-root /rdss/p57098/${USER}/caver/logs/slurm
+```
+
+That one flag expands the old manual bundle:
+
+- lagged driver instead of the single-round submitter
+- `openpi-exact` serving plus exact rollout payload capture
+- `gesim_live_summary` as the selector provider input
+- seeded proposal-side MLP proxy and DR calibrator artifacts
+- `2 x L40S` and a longer default walltime when you do not override them explicitly
+
+### 6. Explicit lagged Stage-E run
 
 The lagged driver is:
 
@@ -282,7 +320,11 @@ The lagged driver is:
 scripts/stagee/run_stage0_caver_lagged_budget.py
 ```
 
-At the time of writing there is no dedicated Slurm submit wrapper for it yet, so the current pattern is to submit it via `scripts/slurm/submit_experiment.sh`.
+The dedicated Slurm wrapper is now:
+
+```text
+scripts/slurm/submit_stage0_caver_lagged_budget.sh
+```
 
 The active reference run is job `5873`, which launches the lagged driver with:
 
@@ -298,7 +340,7 @@ If you need to reproduce that path, use the same structure as the live `5873` jo
 /rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260413T092720Z/job.sbatch
 ```
 
-### 6. Summaries and plots
+### 7. Summaries and plots
 
 Grid summarization:
 

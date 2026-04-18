@@ -6,6 +6,7 @@ import collections
 import json
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -59,6 +60,22 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         "--dry-run",
         action="store_true",
         help="Print planned subround and finalizer commands without running them.",
+    )
+    parser.add_argument(
+        "--resume-existing",
+        action="store_true",
+        help=(
+            "Reuse completed lagged subrounds already present under --results-dir instead of "
+            "requiring an empty destination directory."
+        ),
+    )
+    parser.add_argument(
+        "--cleanup-incomplete-rounds",
+        action="store_true",
+        help=(
+            "With --resume-existing, delete round directories that exist but do not contain a "
+            "completed caver_round_summary.json before rerunning that round."
+        ),
     )
     parsed, remaining = parser.parse_known_args(argv)
     return parsed, remaining
@@ -121,6 +138,10 @@ def ensure_empty_or_create(path: Path) -> None:
             raise ValueError(f"path exists and is not a directory: {path}")
         if any(path.iterdir()):
             raise ValueError(f"directory already exists and is not empty: {path}")
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
@@ -241,8 +262,12 @@ def main(argv: list[str]) -> int:
     lagged_round_root = overall_results_dir / "lagged_rounds"
 
     if not wrapper_args.dry_run:
-        ensure_empty_or_create(overall_results_dir)
-        ensure_empty_or_create(lagged_round_root)
+        if wrapper_args.resume_existing:
+            ensure_directory(overall_results_dir)
+            ensure_directory(lagged_round_root)
+        else:
+            ensure_empty_or_create(overall_results_dir)
+            ensure_empty_or_create(lagged_round_root)
 
     manifest_path = resolve_path(workdir, runner_options.get("--manifest-path"))
     value_proxy_model_path = resolve_path(workdir, runner_options.get("--value-proxy-model-path"))
@@ -285,6 +310,39 @@ def main(argv: list[str]) -> int:
         )
         log(f"[stagee-lagged] subround command: {' '.join(shlex.quote(part) for part in subround_cmd)}")
         if not wrapper_args.dry_run:
+            round_summary_path = round_results_dir / "caver_round_summary.json"
+            if round_summary_path.exists():
+                log(f"[stagee-lagged] reusing completed round at {round_results_dir}")
+                round_report = summarize_round(round_results_dir)
+                round_report["round_index"] = round_index
+                round_report["context_offset"] = round_context_offset
+                round_report["context_count"] = round_context_count
+                round_report["input_dr_calibrator_path"] = (
+                    None if previous_calibrator_path is None else str(previous_calibrator_path)
+                )
+                next_calibrator_path = round_results_dir / "caver_lagged_dr_calibrator.json"
+                if next_calibrator_path.exists():
+                    previous_calibrator_path = next_calibrator_path.resolve()
+                    round_report["output_dr_calibrator_path"] = str(previous_calibrator_path)
+                else:
+                    round_report["output_dr_calibrator_path"] = None
+                lagged_round_reports.append(round_report)
+                round_trace_paths.append(round_results_dir / "caver_online_chunks.jsonl")
+                merged_contexts.extend(list(round_report["online"]["contexts"]))
+                continue
+
+            if round_results_dir.exists():
+                if not round_results_dir.is_dir():
+                    raise ValueError(f"path exists and is not a directory: {round_results_dir}")
+                if any(round_results_dir.iterdir()):
+                    if wrapper_args.resume_existing and wrapper_args.cleanup_incomplete_rounds:
+                        log(f"[stagee-lagged] removing incomplete round directory {round_results_dir}")
+                        shutil.rmtree(round_results_dir)
+                    elif wrapper_args.resume_existing:
+                        raise ValueError(
+                            f"incomplete round directory exists: {round_results_dir}; "
+                            "rerun with --cleanup-incomplete-rounds to replace it"
+                        )
             ensure_empty_or_create(round_results_dir)
             subprocess.run(subround_cmd, check=True, cwd=str(repo_root))
             round_report = summarize_round(round_results_dir)
