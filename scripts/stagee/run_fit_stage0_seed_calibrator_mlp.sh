@@ -103,6 +103,6 @@ python3 "${CAVER_REPO_ROOT}/scripts/stagee/build_stage0_seed_calibrator_dataset.
   --dataset-path "${dataset_path}" \
   --output-path "${output_path}" \
   --summary-path "${summary_path}" \
-  --target-key dr_pseudo_outcome_clipped \
+  --target-key dr_pseudo_outcome \
   --model-id stage0_seed_dr_calibrator_mlp_v2 \
   "${fit_args[@]}"

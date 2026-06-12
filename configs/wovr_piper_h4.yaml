@@ -1,0 +1,37 @@
+status: scaffold_only
+study_name: wovr_piper_h4
+derived_from:
+  rlinf_commit: e62de7767f41a61d58eb15d916e8809c70610672
+  upstream_release: WoVR-LIBERO
+notes:
+  - This is a study-local lock scaffold, not a drop-in RLinf config yet.
+  - Fill any remaining environment-wrapper details before the first real run.
+
+policy:
+  init_checkpoint: TDB__seed_warm_start
+  model_type: openpi
+  config_name: pi05_piper_h4
+  base_weight_loader: gs://openpi-assets/checkpoints/pi05_base/params
+  action_dim: 7
+  action_horizon: 4
+
+env:
+  wrapper: piper_realworld_placeholder
+  tasks_config: configs/piper_tasks.yaml
+  camera_config: configs/camera/piper_multiview.yaml
+
+budget:
+  real_budget_cap: null
+  round_size: 25
+  rollout_horizon_chunks: 4
+  imagined_multiplier: 32
+
+training:
+  update_blocks_per_round: 1
+  optimizer_steps_per_block: 500
+  keep_upstream_defaults: true
+
+constraints:
+  matched_budget_protocol: true
+  same_seed_warm_start_as_caver: true
+  no_extra_real_data: true

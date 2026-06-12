@@ -50,6 +50,51 @@ This ordering is intentional. It satisfies the proposal's main claim first and k
   - deferred
   - infeasible under current SDRE constraints
 
+## Active corrected-FASR budget expansion on 2026-06-07
+
+- Goal:
+  - test whether corrected FASR has a real sample-efficiency curve rather than only the current `N=50` win.
+  - user-requested budgets: `N=25` and `N=10`.
+  - seeds: `{7, 13, 29}`.
+- Rationale:
+  - strict CAVER remains mainly a backend-data-efficiency result.
+  - corrected FASR at `N=50` is the current best Stage-E method pass, but it is only one budget point.
+  - `N=25` tests whether FASR can beat or match vanilla `K=1` with half the trusted-execution budget.
+  - `N=10` is an aggressive low-budget diagnostic; it may be noisy, but it directly probes the scarce-verification regime.
+- Protocol:
+  - fresh online collection is required because corrected FASR needs `--trace-stage0-progress`; older strict `N=25` traces were not collected for verified-progress segment repair.
+  - use `gpu-l40s`, `K=4`, `H=4`, GE-Sim live summaries, exact rollout payload, seeded MLP value proxy, seeded MLP DR calibrator, and `caver_family_segment_repair`.
+  - online collection jobs skip backend update with `--finalizer-skip-backend-update`; exact-offline posttrain/eval will be submitted after admission summaries are inspected.
+- Expected outputs:
+  - online/finalizer run roots under `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_runs_v1`.
+  - Slurm logs under `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_logs_v1/slurm`.
+  - after completion: submit exact-offline posttrain/eval, aggregate `N={10,25,50}`, and refresh paper figures/tables.
+- Jobs submitted at `2026-06-07 21:07 MDT`:
+  - `8727`: corrected FASR `N=10`, seed `7`, running on `l40s-01`, walltime limit `2026-06-08 21:07 MDT`.
+  - `8728`: corrected FASR `N=10`, seed `13`, running on `l40s-01`, walltime limit `2026-06-08 21:07 MDT`.
+  - `8729`: corrected FASR `N=10`, seed `29`, running on `l40s-01`, walltime limit `2026-06-08 21:07 MDT`.
+  - `8730`: corrected FASR `N=25`, seed `7`, running on `l40s-03`, walltime limit `2026-06-09 21:07 MDT`.
+  - `8731`: corrected FASR `N=25`, seed `13`, running on `l40s-03`, walltime limit `2026-06-09 21:07 MDT`.
+  - `8732`: corrected FASR `N=25`, seed `29`, running on `l40s-03`, walltime limit `2026-06-09 21:07 MDT`.
+- Next check:
+  - verify logs pass OpenPI exact-policy startup.
+  - after online/finalizer completion, inspect `caver_admission_summary.json` for admitted contexts, repair segments, and `full_failed_contexts_admitted=0`.
+  - submit exact-offline posttrain/eval only for cells with valid admitted artifacts.
+- Startup verification at `2026-06-07 21:09 MDT`:
+  - all six jobs remain `RUNNING`.
+  - commands include the intended `N=10`/`N=25` caps, `--trace-stage0-progress`, GE-Sim live summaries, exact rollout payload, and backend-update skip.
+  - OpenPI exact-policy servers started; no startup traceback beyond the known websocket readiness-probe `InvalidMessage` noise is visible.
+- Progress check at `2026-06-08 01:24 MDT`:
+  - `N=10` jobs `8727`, `8728`, and `8729` completed cleanly with `ExitCode=0:0`.
+  - `N=10` online/admission summaries:
+    - seed `7`: online `8/10 = 0.800`, admitted contexts `8`, admitted records `346`, repair records `0`, full failed contexts `0`.
+    - seed `13`: online `10/10 = 1.000`, admitted contexts `10`, admitted records `469`, repair records `0`, full failed contexts `0`.
+    - seed `29`: online `10/10 = 1.000`, admitted contexts `10`, admitted records `383`, repair records `0`, full failed contexts `0`.
+  - Interpretation:
+    - at `N=10`, corrected FASR has not used segment repair; it currently behaves as success-preserving selective admission on this easy prefix of the Stage-0 manifest.
+    - still run exact-offline posttrain/eval after the `N=25` online cells finish, because the held-out checkpoint may still be informative for the low-budget curve.
+  - `N=25` jobs `8730`, `8731`, and `8732` remain running on `l40s-03`.
+
 ## Closure status on 2026-04-17
 
 - The strict proposal-mainline Stage-E comparison is now complete at budget `N=50` for seeds `{7, 13, 29}`.
@@ -75,9 +120,403 @@ This ordering is intentional. It satisfies the proposal's main claim first and k
 - Paper artifacts refreshed from the authoritative Stage-E outputs:
   - figure: `figures/stagee_mainline_budget50_summary.pdf`
   - source summary: `figures/stagee_mainline_budget50_summary.json`
+  - online-trajectory source: `figures/stagee_mainline_budget50_online_curve.json`
+  - previous scatter/bar figure backup: `figures/stagee_mainline_budget50_scatterbar.pdf`
+  - note:
+    - the current paper figure is now a line graph of cumulative and rolling online success over the strict budget-50 contexts
+    - this is a diagnostic online trajectory, not a held-out checkpoint learning curve, because held-out evaluation exists only at the final checkpoint for this strict run
 - Next stage after Stage E closure:
   - carry the frozen mainline path into Stage F / PiPER transfer readiness
   - keep additional Stage-E ablations as optional follow-on analysis, not as blockers for the core simulation-first claim
+
+## Active held-out budget-curve repair on 2026-05-07
+
+- Goal:
+  - produce a proper held-out sample-efficiency curve instead of relying only on the strict final `N=50` held-out point
+  - target curve points:
+    - CAVER proposal-mainline at `N in {25, 50, 100}`
+    - real-only proposal-mainline at `N in {25, 50, 100}`
+- Existing held-out cells before this repair:
+  - real-only `N=25`, `N=50`, `N=100`: complete for seeds `{7, 13, 29}`
+  - CAVER `N=50`: complete for seeds `{7, 13, 29}`
+- Missing cells being generated:
+  - CAVER `N=25`: seeds `{7, 13, 29}`
+  - CAVER `N=100`: seeds `{7, 13, 29}`
+- Initial submission:
+  - jobs `6907` through `6912` were submitted concurrently on `gpu-h200`
+  - `6907` is still running: CAVER `N=25`, seed `7`
+  - `6908` through `6912` failed during exact-policy startup
+- Failure diagnosis:
+  - failure was caused by node-local process/thread pressure from launching too many exact-policy jobs at once on the same H200 node
+  - representative errors:
+    - `fork: Resource temporarily unavailable`
+    - `RLIMIT_NPROC 128 current`
+    - `RuntimeError: can't start new thread`
+    - `Unexpected error from cudaGetDeviceCount() ... Error 304`
+  - this is a launch-concurrency / SDRE process-limit issue, not a CAVER method failure
+- Submitter fix:
+  - [submit_stagee_heldout_budget_curve.py](/projects/p57098/euijin1/Caver/scripts/slurm/submit_stagee_heldout_budget_curve.py) now writes thread-limited inline jobs:
+    - `OMP_NUM_THREADS=1`
+    - `OPENBLAS_NUM_THREADS=1`
+    - `MKL_NUM_THREADS=1`
+    - `NUMEXPR_NUM_THREADS=1`
+    - `TORCHINDUCTOR_COMPILE_THREADS=1`
+  - the submitter now supports serial `afterany` chaining, avoiding stale `afterok` dependencies and avoiding concurrent exact-policy startup pressure
+- Active repair chain:
+  - `6907`: running, CAVER `N=25`, seed `7`
+  - `6913`: pending `afterany:6907`, CAVER `N=25`, seed `13`
+  - `6914`: pending `afterany:6913`, CAVER `N=25`, seed `29`
+  - `6915`: pending `afterany:6914`, CAVER `N=100`, seed `7`
+  - `6916`: pending `afterany:6915`, CAVER `N=100`, seed `13`
+  - `6917`: pending `afterany:6916`, CAVER `N=100`, seed `29`
+- Live check at `2026-05-07 15:29 MDT`:
+  - `6907` remained `RUNNING` on `h200-02`
+  - `6913` through `6917` remained cleanly `PENDING (Dependency)`
+  - `6907` had begun writing online chunk records, so it is past policy-server connection and not stuck at launch
+- Submission records:
+  - `logs/runtime/stagee_heldout_budget_curve_20260507T151743-0600.json`
+  - `logs/runtime/stagee_heldout_budget_curve_20260507T152309-0600.json`
+  - `logs/runtime/stagee_heldout_budget_curve_20260507T152319-0600.json`
+- Conservative walltime upper bound:
+  - if every chained job consumes its full requested walltime, the final job can finish as late as about `2026-05-18 03:17 MDT`
+  - expected completion should be earlier, but the recorded walltime upper bound is the safe scheduler estimate
+- Next action after jobs finish:
+  - aggregate held-out validation/test success over `N={25,50,100}`
+  - create a publication-style sample-efficiency line graph with mean and SEM over seeds
+  - update the Stage-E paper figure and caption to distinguish held-out checkpoint curves from online within-run diagnostics
+- Plotting scaffold prepared:
+  - [plot_stagee_heldout_budget_curve.py](/projects/p57098/euijin1/Caver/scripts/stagee/plot_stagee_heldout_budget_curve.py)
+  - current partial figure: `figures/stagee_heldout_budget_curve.pdf`
+  - current partial source: `figures/stagee_heldout_budget_curve.json`
+  - current partial status:
+    - complete cells: `12`
+    - missing cells: `6`
+    - all missing cells are the active CAVER `N=25` and `N=100` jobs listed above
+
+### Refresh on 2026-05-08
+
+- Status check:
+  - `6907` timed out at `21:00:24`
+  - it reached only context `18/25`, so the failure happened during online CAVER collection rather than held-out post-training
+  - the bottleneck is full `gesim_live_summary` scoring plus slow failure episodes, not Slurm startup
+- Cleanup:
+  - cancelled the under-timed repair chain `6913` through `6917`
+  - no stale `DependencyNeverSatisfied` jobs remain
+- Submitter update:
+  - CAVER `N=25` inline walltime increased to `1-23:00:00`
+  - CAVER `N=100` inline walltime increased to `6-09:00:00`
+  - thread limits and serial `afterany` chaining remain enabled
+- Active replacement chain:
+  - `6939`: running, CAVER `N=25`, seed `7`, walltime `1-23:00:00`
+  - `6940`: pending `afterany:6939`, CAVER `N=25`, seed `13`, walltime `1-23:00:00`
+  - `6941`: pending `afterany:6940`, CAVER `N=25`, seed `29`, walltime `1-23:00:00`
+  - `6942`: pending `afterany:6941`, CAVER `N=100`, seed `7`, walltime `6-09:00:00`
+  - `6943`: pending `afterany:6942`, CAVER `N=100`, seed `13`, walltime `6-09:00:00`
+  - `6944`: pending `afterany:6943`, CAVER `N=100`, seed `29`, walltime `6-09:00:00`
+- Submission record:
+  - `logs/runtime/stagee_heldout_budget_curve_20260508T122806-0600.json`
+  - `logs/runtime/stagee_heldout_budget_curve_20260508T122806-0600.md`
+- Startup verification:
+  - `6939` connected to the exact-policy server successfully
+  - current log shows it starting context `1/25`
+  - generated job scripts contain `OMP_NUM_THREADS=1` and `TORCHINDUCTOR_COMPILE_THREADS=1`
+- Conservative walltime upper bound:
+  - if all six replacement jobs consume full walltime serially, the final job can finish as late as about `2026-06-02 12:28 MDT`
+  - if the first `N=25` replacement still approaches its new walltime limit, reassess before letting the `N=100` cells consume the long queue
+
+### Refresh on 2026-05-09
+
+- Current Slurm state at `2026-05-09 13:43 MDT`:
+  - `6942`: running, CAVER `N=100`, seed `7`, on `h200-02`
+  - `6943`: pending `afterany:6942`, CAVER `N=100`, seed `13`
+  - `6944`: pending `afterany:6943`, CAVER `N=100`, seed `29`
+- Completed online collection:
+  - `6939`: CAVER `N=25`, seed `7`
+  - `6940`: CAVER `N=25`, seed `13`
+  - `6941`: CAVER `N=25`, seed `29`
+  - all three completed `25/25` online contexts
+  - all three had online success `10/25 = 0.400`
+  - admitted backend data:
+    - seed `7`: `5` admitted contexts, `164` demo items, `645` primitive steps
+    - seed `13`: `5` admitted contexts, `172` demo items, `678` primitive steps
+    - seed `29`: `5` admitted contexts, `166` demo items, `656` primitive steps
+- New failure diagnosis:
+  - `6939`, `6940`, and `6941` failed after online collection, during the backend-training finalizer
+  - Ray GCS failed to start with `thread: Resource temporarily unavailable`
+  - the online artifacts and admitted demo manifests were still written and are reusable
+  - this is now a post-training/Ray isolation problem, not an online CAVER collection problem
+- Recovery action:
+  - patched [submit_stage0_posttrain_from_round.sh](/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_posttrain_from_round.sh) to export conservative thread limits for post-train jobs
+  - initially submitted `6958` through `6960`, then cancelled them because Slurm placed `6958` on `h200-02` together with online job `6942`
+  - resubmitted post-train-only recovery with `--exclude h200-02` to avoid contention with the active online job:
+    - `6961`: running on `h200-04`, CAVER `N=25`, seed `7`
+    - `6962`: pending `afterany:6961`, CAVER `N=25`, seed `13`
+    - `6963`: pending `afterany:6962`, CAVER `N=25`, seed `29`
+- Active `N=100` online progress:
+  - `6942` is collecting round `1/4`
+  - latest checked log showed progress into container-insertion contexts after completing the block-to-tray prefix
+- Next action:
+  - monitor `6961` first; if post-train succeeds, let `6962` and `6963` run
+  - if `6961` fails with the same Ray GCS thread error even on isolated `h200-04`, switch post-training to a stricter Ray isolation path before submitting more held-out jobs
+  - keep `6942` running because it is producing useful `N=100` online artifacts; post-training can be recovered separately from those artifacts if the inline finalizer fails
+
+## Parallel SDRE follow-on pack before full PiPER study
+
+These runs are not blockers for `Stage F` readiness work, but they are high-value parallel work that should run on SDRE while hardware integration proceeds.
+
+## Verified-progress FASR repair pass on 2026-06-07
+
+- Latest SDRE status:
+  - jobs `8675`, `8676`, and `8677` completed cleanly on `gpu-l40s`
+  - no Slurm failure, traceback, or OOM signature was found in the completed logs
+  - the completed run directories are under `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1`
+- Raw result before the reprocess patch:
+  - seed `7`: online `20/50`, admitted contexts `20`, admitted records `813`
+  - seed `13`: online `20/50`, admitted contexts `20`, admitted records `795`
+  - seed `29`: online `19/50`, admitted contexts `19`, admitted records `723`
+  - all three seeds had `segment_repair_trace_records=0`
+- Diagnosis:
+  - raw traces do contain `stage0_progress_sequence` and `stage0_progress_start`
+  - seed `7` and seed `13` each contain one verified-progress two-object-stack repair candidate above the current `repair_min_progress=0.03` threshold
+  - the admission finalizer was ranking hard-family repair candidates by executed LCB before verified progress gain, so repairable failed stack contexts could be skipped
+  - this was an admission/finalizer bug, not an online collection failure and not missing GE-Sim or LIBERO progress instrumentation
+- Code repair:
+  - [build_caver_round_artifacts.py](/projects/p57098/euijin1/Caver/scripts/stagee/build_caver_round_artifacts.py) now ranks `caver_family_segment_repair` rescue candidates by verified `repair_progress_gain` first, then LCB/value diagnostics
+  - rejected contexts now preserve `repair_progress_point_count` for diagnosis instead of resetting it to zero
+  - syntax check passed with `python3 -m py_compile scripts/stagee/build_caver_round_artifacts.py`
+- Dry reprocess results with the patched admission finalizer:
+  - seed `7`: admits one `two_object_stack_proxy` repair segment, `segment_repair_trace_records=12`, `contexts_admitted=21`
+  - seed `13`: admits one `two_object_stack_proxy` repair segment, `segment_repair_trace_records=12`, `contexts_admitted=21`
+  - seed `29`: no verified repair segment above threshold, `contexts_admitted=19`
+  - all dry reprocesses keep `full_failed_contexts_admitted=0`
+- Next concrete step:
+  - full reprocess the three completed online runs from existing traces using the patched finalizer
+  - rebuild admitted trace and demo manifests without rerunning online LIBERO collection
+  - run backend posttrain/held-out evaluation only after the corrected admitted manifests are checked
+  - compare the corrected FASR result directly against vanilla `K=1` at `N=50`
+- Active full reprocess jobs:
+  - submitted at UTC stamp `20260607T115933Z`
+  - job `8693`: seed `7`, CPU reprocess from existing online traces
+  - job `8694`: seed `13`, dependency removed at `2026-06-07 06:06 MDT` to allow parallel execution
+  - job `8695`: seed `29`, dependency removed at `2026-06-07 06:06 MDT` to allow parallel execution
+  - expected corrected result directories:
+    - `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed7__budget50__20260607T115933Z`
+    - `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed13__budget50__20260607T115933Z`
+    - `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed29__budget50__20260607T115933Z`
+  - updated ETA if CPU slots are allocated promptly: about `2026-06-07 07:15 MDT`
+  - fallback conservative finish if any job consumes its full requested walltime: `2026-06-07 10:00 MDT`
+- Replacement reprocess jobs after early-stop patch:
+  - jobs `8693`, `8694`, and `8695` were cancelled at `2026-06-07 07:21 MDT`
+  - reason:
+    - they were still running inside the old writer after the admitted traces reached expected size
+    - the old writer scanned the rest of the source trace even after all admitted records were written
+  - code fix:
+    - [build_caver_round_artifacts.py](/projects/p57098/euijin1/Caver/scripts/stagee/build_caver_round_artifacts.py) now stops `write_admitted_trace_subset` once the expected admitted record count has been written
+    - syntax check passed after the patch
+  - moved partial outputs to `*.aborted_no_early_stop`
+  - new jobs submitted with UTC stamp `20260607T132209Z`:
+    - `8696`: seed `7`
+    - `8697`: seed `13`
+    - `8698`: seed `29`
+  - expected corrected result directories:
+    - `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed7__budget50__20260607T132209Z`
+    - `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed13__budget50__20260607T132209Z`
+    - `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed29__budget50__20260607T132209Z`
+  - expected finish if the early-stop patch behaves as intended: about `2026-06-07 08:25 MDT`
+- Replacement reprocess completion:
+  - `8696`, `8697`, and `8698` completed with exit code `0:0`
+  - corrected admission summaries:
+    - seed `7`: `21` admitted contexts, `825` admitted records, `12` segment-repair records, one `two_object_stack_proxy` repair
+    - seed `13`: `21` admitted contexts, `807` admitted records, `12` segment-repair records, one `two_object_stack_proxy` repair
+    - seed `29`: `19` admitted contexts, `723` admitted records, no segment repair above threshold
+  - all corrected summaries report `admitted_trace_write_status=complete`
+  - all corrected summaries report `full_failed_contexts_admitted=0`
+  - next job wave:
+    - run exact-offline posttrain and held-out validation/test evaluation from the three corrected admitted traces
+    - compare corrected FASR against vanilla `K=1`, guarded `K=1`, and the previous CAVER mainline
+- Corrected FASR posttrain/eval wave:
+  - submitted at `2026-06-07 11:08 MDT`
+  - jobs:
+    - `8700`: seed `7`, `gpu-l40s`, `1 x L40S`
+    - `8701`: seed `13`, `gpu-l40s`, `1 x L40S`
+    - `8702`: seed `29`, `gpu-l40s`, `1 x L40S`
+  - command path:
+    - [submit_stage0_posttrain_from_round.sh](/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_posttrain_from_round.sh)
+    - backend: `exact_offline_nft`
+    - held-out eval partitions: `T_val_S0`, `T_test_S0`
+    - chunk horizon: `H=4`
+  - conservative finish bound from requested walltime: about `2026-06-07 19:09 MDT`
+  - expected output root:
+    - `/rdss/p57098/euijin1/caver/stagee_posttrain`
+  - startup verification:
+    - all three jobs entered `RUNNING` on `l40s-01`
+    - stderr logs were empty at the startup check
+    - stdout logs showed each job reached exact rollout-batch conversion from the corrected `caver_admitted_chunks.jsonl.gz`
+- Posttrain/eval failure and project-storage replacement:
+  - jobs `8700`, `8701`, and `8702` failed after about `8-9` minutes with exit code `1:0`
+  - failure mode:
+    - exact rollout conversion wrote `posttrain_exact_rollout_batch.pt` under RDSS
+    - immediate `torch.load` validation failed with `KeyError: "filename 'storages' not found"`
+    - this matches the converter's known warning that large `torch.save` artifacts may be invalid on RDSS
+  - corrective patch:
+    - [common.sh](/projects/p57098/euijin1/Caver/scripts/common.sh) now defines `CAVER_DEFAULT_PROJECT_ROOT`
+    - [run_stage0_posttrain_from_round.sh](/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_posttrain_from_round.sh) now defaults exact-offline NFT artifacts to `/projects` instead of RDSS
+    - shell syntax check passed
+  - replacement jobs submitted at `2026-06-07 11:21 MDT` with explicit project artifact roots under `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1`:
+    - `8708`: seed `7`
+    - `8709`: seed `13`
+    - `8710`: seed `29`
+  - replacement jobs are running on `l40s-01`
+  - conservative finish bound from requested walltime: about `2026-06-07 19:22 MDT`
+  - startup verification at `2026-06-07 11:34 MDT`:
+    - all three replacement jobs were still running past the previous RDSS failure window
+    - project-storage exact rollout batches were written and reload-validated:
+      - seed `7`: `21` contexts, `3274` primitive steps, `532M` batch
+      - seed `13`: `21` contexts, `3194` primitive steps, `544M` batch
+      - seed `29`: `19` contexts, `2862` primitive steps, `410M` batch
+    - training had started for all three jobs
+    - nonfatal warning observed: offline NFT batch contains step index `4` while config had `num_steps=4`; the backend inferred `num_steps=5` for schedule construction
+  - live training check at `2026-06-07 12:06 MDT`:
+    - jobs `8708`, `8709`, and `8710` were still running
+    - no held-out summaries had been written yet
+    - process inspection showed active `ray::EmbodiedFSDPActor.run_training` workers
+    - sampled GPU status showed the visible L40S at `100%` utilization, so the jobs are active rather than idle
+- Corrected FASR held-out result:
+  - jobs `8708`, `8709`, and `8710` completed with exit code `0:0`
+  - result artifact:
+    - [stagee_fasr_progress_ranked_budget50_summary.json](/projects/p57098/euijin1/Caver/figures/stagee_fasr_progress_ranked_budget50_summary.json)
+  - seed-level held-out results:
+    - seed `7`: validation `0.230`, test `0.240`, admitted contexts `21`, primitive steps `3274`
+    - seed `13`: validation `0.220`, test `0.250`, admitted contexts `21`, primitive steps `3194`
+    - seed `29`: validation `0.210`, test `0.230`, admitted contexts `19`, primitive steps `2862`
+  - aggregate over seeds `{7,13,29}`:
+    - validation: `0.220 +/- 0.006`
+    - test: `0.240 +/- 0.006`
+    - admitted contexts: `20.33`
+    - admitted demo items: `785`
+    - primitive steps: `3110`
+  - comparison at `N=50`:
+    - previous conservative CAVER: test `0.223`, validation `0.200`, demo items `338`, primitive steps `1338`
+    - vanilla real-only `K=1`: test `0.227`, validation `0.220`, demo items `3816`, primitive steps `15238`
+    - success-only: test `0.233`, validation `0.213`, demo items `769`, primitive steps `3049`
+    - hard-rescue full-trace: test `0.237`, validation `0.220`, demo items `1414`, primitive steps `5631`
+  - interpretation:
+    - this is the first Stage-E method pass that clearly beats vanilla `K=1` on held-out test mean while matching its validation mean
+    - it still uses about `4.9x` fewer demo items and `4.9x` fewer primitive steps than vanilla `K=1`
+    - it uses more admitted data than the original conservative CAVER, but the added data is targeted and includes only two short verified-progress stack repair segments rather than full failed traces
+    - this is a materially better simulation result than the previous conservative CAVER point and should be promoted as the current Stage-E best method variant unless a later pass improves it further
+
+### Why this pack matters
+
+- The current mainline result is good enough to justify PiPER readiness work.
+- It is not yet enough to justify the full three-task real study without extra diagnosis.
+- The most important current caution from the authoritative artifacts:
+  - at strict `N=50`, admitted CAVER backend data is concentrated entirely in `container_insertion_proxy` for all seeds `{7, 13, 29}`
+  - this means the current result should not be treated as equally validated across all Stage-1-relevant task families
+
+### Pack A: analytics from existing artifacts
+
+- produce per-task / per-family Stage-0 tables from current CAVER and real-only outputs
+- produce admission diagnostics from the current mainline artifacts:
+  - admitted family counts
+  - admission reason histogram
+  - admitted / rejected contexts by family
+  - update-trigger risk and zero-/low-admission patterns
+- produce a compact Stage-E memo that answers:
+  - whether the current gain is carried by the three PiPER-relevant families
+  - whether the `20%` admission rate is a stable design effect or a calibration artifact
+
+### Pack B: budget-curve reruns
+
+- run at least `N in {25, 50, 100}` for:
+  - CAVER lagged proposal-mainline
+  - real-only proposal-mainline
+- goal:
+  - test whether the current claim strengthens into a clearer budget-curve story
+  - especially whether `CAVER@25` approaches `real-only@50`
+
+### Pack C: minimal attribution before full PiPER
+
+- selection-only:
+  - keep CAVER selector
+  - admit all executed non-error contexts
+- admission-only:
+  - use uniform safe-set selection
+  - keep CAVER admission gate
+- no-DR:
+  - keep selector and admission gate
+  - replace candidate-level DR correction with executed-only supervision for the refreshed calibrator
+- note:
+  - selection-only and admission-only are directly launchable with current Stage-E knobs
+  - no-DR is still a small implementation gap and should be tracked as such until the ablation switch exists cleanly
+
+### Execution order for the parallel pack
+
+1. analytics from existing artifacts
+2. budget-curve reruns at `N=25,50,100`
+3. selection-only and admission-only
+4. no-DR after the ablation switch is implemented cleanly
+
+### How this affects the Stage F gate
+
+- Stage F may proceed as:
+  - PiPER readiness
+  - shadow-mode validation
+  - safety and labeler checks
+  - one-task pilot planning
+- Stage F should not yet proceed as:
+  - full three-task, multi-budget, multi-baseline real-robot study
+- the full Stage-1 study should wait until:
+  - Pack A confirms where the current simulation gain really comes from
+  - Pack B and Pack C do not reveal a major failure mode in selection / admission / DR behavior
+
+### Active submission wave on 2026-04-18
+
+- The parallel SDRE follow-on pack is now actively running.
+- Submission logs:
+  - `logs/runtime/stagee_parallel_followon_pack_20260418T015945-0600.json`
+  - `logs/runtime/stagee_parallel_followon_pack_20260418T015945-0600.md`
+- Upstream / dependent job groups:
+  - mainline CAVER `N=25`:
+    - round jobs `6068`, `6072`, `6076`
+    - dependent held-out jobs `6069`, `6073`, `6077`
+  - mainline real-only `N=25`:
+    - round jobs `6070`, `6074`, `6078`
+    - dependent held-out jobs `6071`, `6075`, `6079`
+  - mainline CAVER `N=100`:
+    - round jobs `6080`, `6084`, `6088`
+    - dependent held-out jobs `6081`, `6085`, `6089`
+  - mainline real-only `N=100`:
+    - round jobs `6082`, `6086`, `6090`
+    - dependent held-out jobs `6083`, `6087`, `6091`
+  - selection-only `N=50`:
+    - round jobs `6092`, `6094`, `6096`
+    - dependent held-out jobs `6093`, `6095`, `6097`
+  - admission-only `N=50`:
+    - round jobs `6098`, `6100`, `6102`
+    - dependent held-out jobs `6099`, `6101`, `6103`
+- Partition placement for this wave:
+  - CAVER-like upstream jobs run on `gpu-h200` with `2 x H200`
+  - real-only upstream jobs run on `gpu-l40s` with `1 x L40S`
+  - all dependent held-out post-train jobs run on `gpu-h200` with `1 x H200`
+- Estimated upper-bound finish windows from the `2026-04-18 01:59:45` MDT submission time:
+  - real-only `N=25` cells: upstream by about `2026-04-18 07:59:45 MDT`, held-out by about `2026-04-18 15:59:45 MDT`
+  - CAVER `N=25` cells: upstream by about `2026-04-18 09:59:45 MDT`, held-out by about `2026-04-18 17:59:45 MDT`
+  - all `N=50` ablations: upstream by about `2026-04-18 13:59:45 MDT`, held-out by about `2026-04-18 23:59:45 MDT`
+  - real-only `N=100` cells: upstream by about `2026-04-18 13:59:45 MDT`, held-out by about `2026-04-19 01:59:45 MDT`
+  - CAVER `N=100` cells: upstream by about `2026-04-18 17:59:45 MDT`, held-out by about `2026-04-19 05:59:45 MDT`
+- Immediate startup verification:
+  - `squeue` right after submission showed all `18` upstream jobs already `RUNNING` and all `18` held-out jobs `PENDING (Dependency)`
+  - representative stderr checks:
+    - `6068`: mainline CAVER `N=25` started its lagged round and launched the exact-policy server cleanly
+    - `6070`: mainline real-only `N=25` launched the exact-policy server cleanly
+    - `6098`: admission-only `N=50` started with `selection_policy=uniform` and the intended `success_lcb_v1` gate
+- Method-side fix applied before this wave:
+  - admission-only now reuses the fitted value-proxy / DR calibrator when selector metrics must be recomputed from trace records
+  - touched files:
+    - [caver_heuristic.py](/projects/p57098/euijin1/Caver/scripts/stagee/caver_heuristic.py)
+    - [build_caver_round_artifacts.py](/projects/p57098/euijin1/Caver/scripts/stagee/build_caver_round_artifacts.py)
+    - [run_stage0_caver_round.sh](/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_caver_round.sh)
 
 ## Current recovery status on 2026-04-16
 
@@ -3964,3 +4403,3206 @@ This ordering is intentional. It satisfies the proposal's main claim first and k
     - Stage-E implication:
       - the strict proposal-mainline budget-`50` simulation comparison is now complete end to end
       - this supports a simulation-stage sample-efficiency claim more naturally than a dominant absolute-success-rate claim
+
+## 2026-05-09 Progress: Budget-Curve Recovery
+
+- Goal:
+  - build a proper sample-efficiency line graph from held-out performance at `N in {25, 50, 100}` instead of using only the budget-`50` bar/summary figure
+  - preserve proposal alignment: strict CAVER mainline uses GE-Sim provider summaries, lagged DR calibrator, MLP value proxy, `H=4`, and exact offline NFT post-train/eval
+- Current Slurm status checked at `2026-05-09 15:30 MDT`:
+  - `6942`:
+    - CAVER `N=100`, seed `7`
+    - `RUNNING` on `h200-02`
+    - elapsed about `04:25`
+    - online collection is in lagged round `2/4`
+    - last observed progress: round 2 reached context `7/25`; round 1 completed `25/25` with online success `1.000`
+    - scheduler walltime upper bound: `6-09:00:00`, but practical runtime estimate is closer to overnight if per-context speed remains stable
+  - `6943` and `6944`:
+    - CAVER `N=100`, seeds `13` and `29`
+    - `PENDING` on dependency after the seed-`7` chain
+  - failed recovery jobs `6961`, `6962`, `6963`:
+    - CAVER `N=25` held-out post-train/eval recoveries for seeds `7`, `13`, `29`
+    - failed before training because Ray GCS/raylet hit SDRE's low process/thread limit
+- Root cause isolated:
+  - SDRE shell reports `ulimit -u` soft `128`, hard `256`
+  - Ray `2.49.1` was crashing in GCS/raylet with `pthread_create failed: Resource temporarily unavailable`
+  - minimal Ray startup succeeded only after:
+    - raising soft nproc limit to `256`
+    - capping Ray server/client thread pools to `1`
+    - using valid Ray config keys only
+- Fix applied first:
+  - [with_openpi_pistepnft_libero_train.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/env/with_openpi_pistepnft_libero_train.sh)
+    - raises soft nproc to `256` when permitted
+    - exports SDRE-safe Ray thread caps
+    - defaults local Ray CPU count to `1`
+  - `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/scheduler/cluster/cluster.py`
+    - local Ray init now injects low-thread `_system_config` by default:
+      - `num_server_call_thread=1`
+      - `gcs_server_rpc_server_thread_num=1`
+      - `gcs_server_rpc_client_thread_num=1`
+      - `worker_num_grpc_internal_threads=1`
+      - `object_manager_rpc_threads_num=1`
+    - verified with a local Ray startup smoke through the patched training stack
+- Follow-up issue found:
+  - probe job `6964` cleared the earlier GCS startup failure, entered RLinf training, then entered a raylet/default-worker crash loop
+  - new failure signature was still `Resource temporarily unavailable`, but this time from worker-side gRPC/OpenCensus thread creation rather than initial GCS startup
+  - `6964` was canceled at `2026-05-09 15:39 MDT` to avoid wasting an H200 allocation
+- Additional Ray worker-pool fix applied:
+  - [with_openpi_pistepnft_libero_train.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/env/with_openpi_pistepnft_libero_train.sh)
+    - now also exports:
+      - `RAY_enable_worker_prestart=0`
+      - `RAY_prestart_worker_first_driver=0`
+      - `RAY_num_workers_soft_limit=1`
+      - `RAY_max_io_workers=1`
+  - `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/scheduler/cluster/cluster.py`
+    - local Ray `_system_config` now also includes:
+      - `enable_worker_prestart=false`
+      - `prestart_worker_first_driver=false`
+      - `num_workers_soft_limit=1`
+      - `max_io_workers=1`
+    - verified with a wrapper-level Ray smoke test:
+      - nproc limit `(256, 256)`
+      - Ray `2.49.1`
+      - full low-thread `_system_config` accepted
+      - local Ray started and shut down cleanly
+- New recovery probe:
+  - submitted job `6964` at `2026-05-09 15:30 MDT`
+  - purpose: recover CAVER `N=25`, seed `7` held-out post-train/eval after the Ray fix
+  - partition: `gpu-h200`
+  - node: started on `h200-04`
+  - walltime: `14:00:00`
+  - scheduler upper bound: about `2026-05-10 05:30 MDT`
+  - expected runtime if healthy: roughly `3-5` hours based on prior held-out post-train/eval jobs
+- Replacement recovery probe:
+  - submitted job `6965` at `2026-05-09 15:39 MDT`
+  - purpose: same CAVER `N=25`, seed `7` held-out post-train/eval, now with worker-prestart disabled and worker/IO pools capped
+  - partition: `gpu-h200`
+  - node: started on `h200-05`
+  - walltime: `14:00:00`
+  - scheduler upper bound: about `2026-05-10 05:39 MDT`
+  - expected runtime if healthy: roughly `3-5` hours based on prior held-out post-train/eval jobs
+  - logs:
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T213913Z-6965.out`
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T213913Z-6965.err`
+- Follow-up issue found:
+  - `6965` still reproduced the worker-side Ray failure after entering RLinf actor launch
+  - failure moved to Ray default-worker / WorkerManager task execution, still with `Resource temporarily unavailable`
+  - `6965` was canceled at `2026-05-09 15:43 MDT`
+- Local-mode fix applied:
+  - `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/scheduler/cluster/cluster.py`
+    - supports `CAVER_RLINF_RAY_LOCAL_MODE=1`, which passes `local_mode=True` to `ray.init`
+  - [run_stage0_demo_training.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/pistepnft/run_stage0_demo_training.sh)
+    - enables `CAVER_RLINF_RAY_LOCAL_MODE=1` by default for `offline_demo_only` post-train jobs
+  - wrapper-level Ray smoke test passed with:
+    - nproc limit `(256, 256)`
+    - `local_mode=true`
+    - a remote actor created and called successfully without spawning default-worker processes
+- Replacement recovery probe:
+  - submitted job `6966` at `2026-05-09 15:45 MDT`
+  - purpose: same CAVER `N=25`, seed `7` held-out post-train/eval, now using Ray local mode for offline post-training
+  - partition: `gpu-h200`
+  - walltime: `14:00:00`
+  - scheduler upper bound: about `2026-05-10 05:45 MDT`
+  - expected runtime if healthy: roughly `3-5` hours based on prior held-out post-train/eval jobs
+  - logs:
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T214502Z-6966.out`
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T214502Z-6966.err`
+- Follow-up issue found:
+  - `6966` avoided the thread-limit crash but failed because Ray local mode does not support async actor classes
+  - immediate failing actor was `DeviceLockManager`, whose lock API was async and whose constructor also tried to instantiate a nested `Cluster()`
+  - `6966` failed quickly with exit `1:0`, no long H200 burn
+- Local-mode manager fix applied:
+  - `/uhome/euijin1/projects/p57098/euijin1/Caver/third_party/src/pi-StepNFT/rlinf/scheduler/manager/lock_manager.py`
+    - converted `DeviceLockManager` to a synchronous condition-lock implementation
+    - in local mode, derives accelerator count directly from `CUDA_VISIBLE_DEVICES` / Slurm GPU env vars instead of constructing a nested `Cluster()`
+  - verified:
+    - local-mode `DeviceLockManager` and `PortLockManager` smoke test passes
+    - local-mode `Cluster(cluster_cfg=...)` reaches manager launch successfully
+- Replacement recovery probe:
+  - submitted job `6967` at `2026-05-09 15:54 MDT`
+  - purpose: same CAVER `N=25`, seed `7` held-out post-train/eval, now with local-mode-compatible lock managers
+  - partition: `gpu-h200`
+  - walltime: `14:00:00`
+  - scheduler upper bound: about `2026-05-10 05:54 MDT`
+  - expected runtime if healthy: roughly `3-5` hours based on prior held-out post-train/eval jobs
+  - logs:
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T215444Z-6967.out`
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T215444Z-6967.err`
+- Follow-up issue found:
+  - `6967` also failed quickly because RLinf's actor/channel stack is not compatible with Ray local mode
+  - conclusion: Ray local mode is not a viable fix for exact-NFT posttraining without much larger RLinf surgery
+  - local-mode default was removed from [run_stage0_demo_training.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/pistepnft/run_stage0_demo_training.sh); local-mode support remains opt-in only
+- Node-specific diagnostic probe:
+  - submitted job `6968` at `2026-05-09 16:00 MDT`
+  - purpose: retry normal Ray exact-NFT posttraining on `h200-01`, because prior successful budget-`50` held-out posttrain jobs ran on `h200-01` while the new Ray thread-limit failures occurred on `h200-04`/`h200-05`
+  - implementation: excluded `h200-02,h200-04,h200-05,h200-06,h200-07`, leaving only `h200-01`
+  - status at submit check:
+    - `PENDING (Resources)`
+    - `h200-01` currently has all `8/8` H200 GPUs allocated by other work, so start time is unknown
+  - walltime after start: `14:00:00`
+  - expected runtime after start if healthy: roughly `3-5` hours
+  - logs:
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T220024Z-6968.out`
+    - `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260509T220024Z-6968.err`
+- Next action:
+  - monitor `6968`; if it also fails on `h200-01`, stop exact-NFT posttrain probes and treat this as an SDRE Ray/process-limit blocker requiring either admin nproc increase or a non-RLinf direct offline fine-tune path
+  - if `6968` is healthy, submit the remaining CAVER `N=25` post-train recoveries for seeds `13` and `29`
+  - once CAVER `N=25` and `N=100` summaries exist, regenerate:
+    - held-out budget-curve CSV
+    - sample-efficiency line plot
+    - Stage-E result table for the proposal/paper draft
+- Latest status check at `2026-05-09 16:01 MDT`:
+  - `6942` remains healthy on `h200-02`
+  - CAVER `N=100`, seed `7` is in round `2/4`
+  - round `2/4` has completed `12/25` contexts, all successful so far; context `13/25` is running
+  - `6943` and `6944` remain dependency-pending behind `6942`
+  - `6968` remains `PENDING (Resources)` for `h200-01`
+	- Latest status check at `2026-05-09 19:36 MDT`:
+	  - `6942` remains `RUNNING` on `h200-02`
+	  - CAVER `N=100`, seed `7` online progress:
+	    - round `1/4`: completed `25/25`, success `25/25 = 1.000`
+    - round `2/4`: completed `25/25`, success `15/25 = 0.600`
+    - cumulative through two rounds: `40/50 = 0.800`
+  - round `2/4` task-family diagnostic:
+    - container-insertion proxy contexts succeeded
+    - two-object-stack proxy contexts failed repeatedly at the `400`-step horizon
+    - this is likely to depress the `N=100` held-out curve unless later rounds recover stack performance
+  - round `2/4` artifacts are being generated:
+    - `caver_online_eval.json`, `caver_online_contexts.jsonl`, and `caver_online_chunks.jsonl` are written
+    - `caver_admitted_chunks.jsonl` was updated at `2026-05-09 19:37 MDT`
+    - round `3/4` has not started yet
+  - `6943` and `6944` remain dependency-pending behind `6942`
+	  - `6968` remains `PENDING (Resources)` for the `h200-01` diagnostic:
+	    - Slurm estimated start: `2026-05-12 14:53 MDT`
+	    - reason: `h200-01` currently has no free H200 GPU and the job excludes the other H200 nodes intentionally
+	- Latest status check at `2026-05-10 22:45 MDT`:
+	  - active Slurm state:
+	    - `6942` CAVER `N=100`, seed `7`: `FAILED`, exit `1:0`, elapsed `1-08:06:22`, node `h200-02`
+	    - `6943` CAVER `N=100`, seed `13`: `RUNNING`, node `h200-02`, time limit `6-09:00:00`, scheduler end bound `2026-05-17 04:12 MDT`
+	    - `6944` CAVER `N=100`, seed `29`: `PENDING (Dependency)` behind `6943`
+	    - `6968` CAVER `N=25`, seed `7` held-out post-train diagnostic: `PENDING (Resources)` for `h200-01`, Slurm estimated start `2026-05-12 14:53 MDT`, walltime after start `14:00:00`
+	  - `6942` failure diagnosis:
+	    - the expensive online lagged CAVER work completed and is recoverable
+	    - top-level merged online/admission/DR/demo artifacts exist under `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget100__20260508T182808Z/results`
+	    - failure happened only when the top-level finalizer launched RLinf/Ray backend training from `run_stage0_caver_round.sh --skip-online`
+	    - error signature: `pthread_create failed: Resource temporarily unavailable`, `RuntimeError: Resource temporarily unavailable`, and Ray `Failed to start worker with return value system:11`
+	  - `6942` recovered online/admission summary:
+	    - round `1/4`: `25/25` online successes, `5/25` contexts admitted
+	    - round `2/4`: `15/25` online successes, `15/25` contexts admitted
+	    - round `3/4`: `0/25` online successes, `0/25` contexts admitted
+	    - round `4/4`: `0/25` online successes, `0/25` contexts admitted
+	    - cumulative online success: `40/100 = 0.400`
+	    - final admission: `20/100` contexts admitted, all from `container_insertion_proxy`
+	    - admitted demo artifact: `688` demo items, `2716` primitive steps, chunk horizon `4`
+	  - `6943` progress:
+	    - round `1/4` online evaluation completed at `2026-05-10 22:34 MDT`
+	    - round `1/4` online success: `25/25 = 1.000`
+	    - current state is round-1 artifact/admission/DR generation; `caver_admitted_chunks.jsonl` updated at `2026-05-10 22:44 MDT`
+	  - current blocker:
+	    - Stage-E budget-curve held-out checkpoints are still blocked by RLinf/Ray backend training under SDRE process/thread limits
+	    - `6968` remains the decisive node-specific diagnostic because it retries the same normal-Ray exact-NFT posttraining on `h200-01`, where earlier budget-`50` posttrains succeeded
+	  - next gate:
+	    - let `6943` continue unless it hits the same finalizer failure; if it fails after online completion, recover the online/admission/demo artifacts instead of rerunning online
+	    - wait for `6968`; if it fails on `h200-01`, stop exact-NFT posttrain probes and switch to an admin-supported Ray/process-limit fix or a non-RLinf direct offline fine-tune path
+	    - once backend posttraining is unblocked, run held-out evaluation for recovered `N=100` artifacts and regenerate the sample-efficiency line figures
+	- Latest status check at `2026-05-11 09:48 MDT`:
+	  - active Slurm state:
+	    - `6943` CAVER `N=100`, seed `13`: `RUNNING`, elapsed `14:36:00`, node `h200-02`
+	    - `6944` CAVER `N=100`, seed `29`: `PENDING (Dependency)` behind `6943`
+	    - `6968` CAVER `N=25`, seed `7` held-out post-train diagnostic: `PENDING (Resources)` for `h200-01`, Slurm estimated start `2026-05-12 14:53 MDT`
+	  - `6943` online progress:
+	    - round `1/4`: completed `25/25`, success `25/25 = 1.000`
+	    - round `2/4`: completed `25/25`, success `15/25 = 0.600`
+	    - round `3/4`: at least `17/25` contexts completed, all failed so far; context `18/25` is running
+	    - failures in round `3/4` are concentrated in `two_object_stack_proxy` and `relocate_to_region_proxy` at the `400`-step horizon
+	  - consistency check against the current paper result:
+	    - no new held-out CAVER `N=25` or `N=100` result is available yet, so the paper's completed quantitative claim remains the strict `N=50` mainline result
+	    - completed `N=50` paper numbers still match `figures/stagee_mainline_budget50_summary.json`: CAVER test `0.223` vs real-only `0.213`, validation `0.200` vs `0.203`, online `0.387` vs `0.400`, and about `11x` fewer admitted backend demo items / primitive steps
+	    - new online/admission artifacts reinforce the earlier caveat: CAVER admission remains highly conservative and family-skewed toward `container_insertion_proxy`
+	    - current result is still best framed as a selective-admission / backend-data-efficiency result, not yet as a dominant held-out-success or real-interaction sample-efficiency result
+
+## Proposal-alignment patch on 2026-05-11 18:36 MDT
+
+- Trigger:
+  - review found several ambiguities between the Stage-E implementation, the experiment interpretation, and `caver_proposal_positioned.tex`
+  - priority was to fix source-level fidelity for future/recovery runs without disrupting active Slurm jobs
+- Code alignment changes:
+  - DR calibrator MLP now defaults to the raw `dr_pseudo_outcome` target instead of the clipped diagnostic target
+  - DR calibrator MLP prediction now exposes the raw mean as `mean` and records `clipped_mean` only as a diagnostic
+  - candidate base features now include the raw novelty coordinate, making the implementation closer to the proposal's `z=[b,N]`
+  - future traces now retain `base_feature_vector` in `candidate_metric_table`; DR dataset building prefers logged features and falls back to recomputation with logged novelty
+  - LIBERO Stage-0 candidate safety is no longer an implicit all-true mask; it now rejects invalid shape, non-finite actions, and extreme action/gripper magnitudes
+  - `libero_remote_eval.py` default `--replan-steps` is now `4`, matching the proposal-pinned chunk horizon
+  - lagged CAVER wrapper now supports a finalizer mode that converts admitted demo artifacts but skips the backend update, so online/admission/demo recovery can be separated from RLinf/Ray failures
+- Paper alignment changes:
+  - replaced overly strong `strict proposal-mainline` wording with `proposal-aligned Stage-0` where the current implementation still has known caveats
+  - clarified that the completed claim is admitted-update-data efficiency at matched trusted-execution budget, not a complete real-interaction sample-efficiency curve
+  - added explicit caveats that `N=25/100` held-out CAVER curve cells remain gating diagnostics and that the `N=50` CAVER admitted set is concentrated in `container_insertion_proxy`
+  - clarified Stage-0 safety as finite/shape/magnitude simulator validity checks, distinct from the later PiPER URDF shield
+- Active jobs:
+  - left running/pending Slurm jobs untouched
+  - current active queue at patch time still contains `6943`, `6944`, and `6968`
+- Next action:
+  - run lightweight syntax/dry-run checks on the patched scripts
+  - do not regenerate the paper PDF until those checks pass
+  - after active jobs finish, use the new finalizer recovery path for any CAVER `N=100` cell that completed online work but failed only in backend training
+
+## Roundwise learning and baseline-expansion plan on 2026-05-12 11:00 MDT
+
+- Terminology decision:
+  - Stage-E is best described as **roundwise/semi-online post-training**
+  - online part: collect trusted LIBERO trajectories with the current policy
+  - offline part: after each round, convert admitted trajectories to backend data and run the StepNFT-style update as a batch/offline post-training step
+  - a round is not the same as `N`; a round has `B_round=25` counted trusted contexts
+  - therefore:
+    - `N=25` means `1` round
+    - `N=50` means `2` rounds
+    - `N=100` means `4` rounds
+    - `N=200` means `8` rounds
+- Baseline taxonomy to use from now on:
+  - **Vanilla real-only `K=1`**:
+    - sample one chunk, execute it, admit every executed trajectory
+    - purpose: tests whether the shared `K=4` candidate wrapper itself helps
+    - budget accounting: one selected candidate execution costs one trusted context
+  - **Matched real-only uniform `K=4`**:
+    - sample four candidate chunks, choose one uniformly at random, execute one, admit every executed trajectory
+    - this is the current main matched baseline
+    - purpose: controls for candidate-generation wrapper and isolates CAVER's informed selection/admission
+    - budget accounting: one executed candidate costs one trusted context
+  - **Full CAVER `K=4`**:
+    - sample four candidate chunks, score with provider/proxy/calibrator, sample one safety-approved candidate with logged propensity, admit only high-confidence successful trajectories
+    - purpose: tests allocation plus conservative conversion of verified outcomes into backend training data
+    - budget accounting: one executed candidate costs one trusted context
+  - **Selection-only**:
+    - CAVER selector, exact propensities, admit every executed trajectory
+    - purpose: isolates candidate allocation
+  - **Admission-only**:
+    - uniform `K=4` selector, CAVER DR/LCB admission
+    - purpose: isolates conservative conversion/admission
+  - **No-DR / no-provider**:
+    - diagnostic ablations for whether DR correction and GE-Sim summaries matter
+- Proposed `K=4 execute-all` baseline:
+  - technically possible in LIBERO because simulation can reset/branch from the same initial state and execute all four sampled candidates
+  - not a fair primary baseline if budget is counted per decision context, because it spends up to `4x` more trusted executions than CAVER at the same `N`
+  - it can be fair only if budget is charged per executed candidate:
+    - `N=50` execute-all means at most `12` full four-candidate contexts plus `2` extra candidate executions
+    - alternatively run `50` contexts and report it as `200` executed-candidate budget, not as `N=50`
+  - worth running only as a **simulation diagnostic / upper-data baseline**, not as a main PiPER baseline
+  - recommended labels:
+    - `execute-all-K4/context-budget-unfair`: diagnostic only, execute all four for each of 50 contexts and report actual executed-candidate cost `200`
+    - `execute-all-K4/candidate-budget-fair`: execute candidates until the same executed-candidate budget is exhausted
+  - not recommended for real PiPER mainline because executing all mutually exclusive candidates from the same state requires repeated resets and quadruples real wear/time
+- Experiment design for the research question:
+  - primary x-axis: trusted executed-candidate budget `N`
+  - primary y-axis: held-out test success
+  - required budgets before a strong claim:
+    - `N=0` seed-only anchor
+    - `N=25`
+    - `N=50`
+    - `N=100`
+    - `N=200` if SDRE/backend stability permits
+  - minimum methods for the next Stage-E curve:
+    - vanilla real-only `K=1`
+    - matched real-only uniform `K=4`
+    - full CAVER `K=4`
+    - selection-only
+    - admission-only
+  - secondary methods if compute allows:
+    - no-DR
+    - no-provider
+    - execute-all `K=4` diagnostic with explicit executed-candidate cost
+- Decision criteria:
+  - strongest interaction-efficiency claim:
+    - `CAVER N=25` approximately matches or exceeds `real-only N=50`
+    - or `CAVER N=50` approximately matches or exceeds `real-only N=100`
+  - admitted-update-data efficiency claim:
+    - CAVER matches held-out performance at the same `N` while admitting substantially fewer demo items / primitive steps
+  - attribution claim:
+    - selection-only beats uniform admit-all if allocation matters
+    - admission-only uses much less backend data at comparable success if conservative admission matters
+- Immediate implementation implications:
+  - no change needed for matched real-only uniform `K=4`; it already exists in `run_stage0_real_only_round.sh`
+  - vanilla `K=1` should be launched by setting `--candidate-count 1 --selection-policy first`
+  - execute-all `K=4` needs a new LIBERO branching runner; do not add it to the primary queue until the current `N=25/100` CAVER curve blocker is resolved
+
+## Vanilla real-only K=1 N=25 launch on 2026-05-12 18:59 MDT
+
+- Code support added:
+  - `scripts/slurm/submit_stagee_heldout_budget_curve.py` now accepts `--methods real_only_k1`
+  - `scripts/slurm/submit_stage0_real_only_round.sh` now accepts `--run-label-suffix` so K=1 runs are not mixed with matched K=4 real-only runs
+  - `scripts/stagee/plot_stagee_heldout_budget_curve.py` can include `real_only_k1` when requested
+- Dry run completed:
+  - `logs/runtime/stagee_k1_dryrun.json`
+  - `logs/runtime/stagee_k1_dryrun.md`
+- Submitted first validation batch on `gpu-l40s`:
+  - job `7086`: `real_only_k1`, `N=25`, seed `7`, run dir `/rdss/p57098/euijin1/caver/runs/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed7__budget25__20260513T005900Z`
+  - job `7087`: `real_only_k1`, `N=25`, seed `13`, run dir `/rdss/p57098/euijin1/caver/runs/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed13__budget25__20260513T005900Z`
+  - job `7088`: `real_only_k1`, `N=25`, seed `29`, run dir `/rdss/p57098/euijin1/caver/runs/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed29__budget25__20260513T005901Z`
+- Submission record:
+  - `logs/runtime/stagee_k1_n25_submission.json`
+  - `logs/runtime/stagee_k1_n25_submission.md`
+- Estimated latest finish:
+  - Slurm time limit is `17:00:00`
+  - expected latest finish if jobs run to limit: `2026-05-13 11:59 MDT`
+- Rationale:
+  - this is the first clean test of whether the current matched K=4 wrapper itself contributes to performance
+  - do not submit `N=50/100` K=1 until at least one of these N=25 jobs reaches post-train successfully or exposes a fixable runner issue
+
+## Progress check on 2026-05-13
+
+- Active Slurm state:
+  - no active GPU Stage-E jobs remain
+  - only current queue entry at check time was interactive CPU job `7112`
+- Completed jobs:
+  - `6944`: CAVER `N=100`, seed `29`, completed successfully on `gpu-h200` in `1-14:22:10`
+  - `7086`: vanilla real-only `K=1`, `N=25`, seed `7`, completed successfully in `07:16:31`
+  - `7087`: vanilla real-only `K=1`, `N=25`, seed `13`, completed successfully in `07:10:46`
+  - `7088`: vanilla real-only `K=1`, `N=25`, seed `29`, completed successfully in `07:16:49`
+- Vanilla real-only `K=1`, `N=25` results:
+  - seed `7`: online `10/25 = 0.400`, held-out validation `0.200`, held-out test `0.230`, primitive steps `7605`
+  - seed `13`: online `10/25 = 0.400`, held-out validation `0.210`, held-out test `0.220`, primitive steps `7438`
+  - seed `29`: online `10/25 = 0.400`, held-out validation `0.230`, held-out test `0.230`, primitive steps `7521`
+  - mean validation `0.213 +/- 0.007`
+  - mean test `0.227 +/- 0.003`
+  - mean primitive steps `7521.3`
+- New CAVER `N=100`, seed `29` result:
+  - held-out validation `0.190`
+  - held-out test `0.240`
+  - exact rollout batch covers `33` admitted contexts
+  - admitted primitive steps `4716`
+  - admitted families: `20` container-insertion proxy contexts and `13` block-to-tray proxy contexts
+- Refreshed partial curve artifacts:
+  - `figures/stagee_heldout_budget_curve_with_k1.json`
+  - `figures/stagee_heldout_budget_curve_with_k1.png`
+  - `figures/stagee_heldout_budget_curve_with_k1.pdf`
+- Current partial aggregate:
+  - CAVER `N=25`: `n=1`, validation `0.210`, test `0.210`, primitive steps `645`
+  - CAVER `N=50`: `n=3`, validation `0.200 +/- 0.005`, test `0.223 +/- 0.003`, primitive steps `1338.3`
+  - CAVER `N=100`: `n=1`, validation `0.190`, test `0.240`, primitive steps `4716`
+  - matched real-only `K=4`, `N=25`: `n=3`, validation `0.213 +/- 0.005`, test `0.230 +/- 0.012`, primitive steps `7563.0`
+  - matched real-only `K=4`, `N=50`: `n=3`, validation `0.203 +/- 0.007`, test `0.213 +/- 0.003`, primitive steps `15194.0`
+  - matched real-only `K=4`, `N=100`: `n=3`, validation `0.217 +/- 0.012`, test `0.233 +/- 0.003`, primitive steps `30573.7`
+  - vanilla real-only `K=1`, `N=25`: `n=3`, validation `0.213 +/- 0.007`, test `0.227 +/- 0.003`, primitive steps `7521.3`
+- Missing cells before this curve can support a strong claim:
+  - CAVER `N=25`, seeds `13` and `29`
+  - CAVER `N=100`, seeds `7` and `13`
+  - vanilla real-only `K=1`, `N=50`, seeds `7`, `13`, `29`
+  - vanilla real-only `K=1`, `N=100`, seeds `7`, `13`, `29`
+- Interpretation:
+  - vanilla `K=1` at `N=25` is very close to matched real-only `K=4` at `N=25`, so the K=4 uniform wrapper alone does not appear to be a major advantage at this budget
+  - CAVER's current `N=100` single completed seed has the highest test point so far, but the single-seed validation is lower and cannot be used as a stable claim yet
+  - the next best action is to recover/complete the missing CAVER post-train cells before launching the larger K=1 `N=50/100` expansion
+
+## CAVER post-train recovery launch on 2026-05-13 11:04 MDT
+
+- Recovery action:
+  - regenerated missing top-level `caver_round_summary.json` files from existing online/admission/demo/DR artifacts
+  - no LIBERO online collection was rerun for these three cells
+  - this fixes the previous failure mode where online CAVER collection succeeded but the inline backend finalizer failed before writing the top-level summary required by the post-train wrapper
+- Submitted recovery jobs on `gpu-l40s`:
+  - `7113`: CAVER `N=25`, seed `13`, time limit `18:00:00`
+  - `7114`: CAVER `N=25`, seed `29`, time limit `18:00:00`
+  - `7115`: CAVER `N=100`, seed `7`, time limit `1-12:00:00`
+- Startup status:
+  - all three jobs are running on `l40s-01`
+  - logs show conversion to `posttrain_exact_rollout_batch.pt` has started
+- Estimated latest finish:
+  - `7113` and `7114`: `2026-05-14 05:04 MDT`
+  - `7115`: `2026-05-14 23:04 MDT`
+- Next gate:
+  - after these jobs finish, regenerate the held-out budget curve
+  - then handle the incomplete CAVER `N=100`, seed `13` cell, which currently has only `75/100` online contexts and needs a resume/rerun for the final round
+
+## CAVER N=100 seed-13 resume launch on 2026-05-13 11:07 MDT
+
+- Initial attempt:
+  - job `7116` failed immediately in `00:00:01`
+  - cause: Slurm `--wrap` used `/bin/sh`; `set -o pipefail` is Bash-only
+  - no CAVER work ran and no experiment artifact was affected
+- Corrected submission:
+  - created Bash sbatch script `logs/runtime/stagee_resume_caver_s13_b100_20260513.sbatch`
+  - submitted job `7117` on `gpu-h200` with `2 x H200`, time limit `3-00:00:00`
+  - latest finish by limit: `2026-05-16 11:07 MDT`
+- Resume behavior verified from startup log:
+  - reuses completed rounds `1/4`, `2/4`, and `3/4`
+  - removes the incomplete `round_004` directory
+  - reruns only the final `25` online contexts
+  - finalizes with `--finalizer-skip-backend-update`
+  - then runs exact-offline-NFT post-train and held-out validation/test inline
+
+## Progress check on 2026-05-14
+
+- Slurm status:
+  - `7113`: completed successfully in `03:22:10`
+  - `7114`: completed successfully in `03:20:51`
+  - `7115`: completed successfully in `04:12:41`
+  - `7117`: still running on `gpu-h200`; training/export is complete and held-out validation/test evaluation is in progress
+- Completed CAVER recovery results:
+  - CAVER `N=25`, seed `13`:
+    - validation `0.210`
+    - test `0.210`
+    - admitted contexts `5`
+    - primitive steps `678`
+    - admitted families: `container_insertion_proxy: 5`
+  - CAVER `N=25`, seed `29`:
+    - validation `0.230`
+    - test `0.240`
+    - admitted contexts `5`
+    - primitive steps `656`
+    - admitted families: `container_insertion_proxy: 5`
+  - CAVER `N=100`, seed `7`:
+    - validation `0.190`
+    - test `0.220`
+    - admitted contexts `20`
+    - primitive steps `2716`
+    - admitted families: `container_insertion_proxy: 20`
+- Refreshed partial curve artifacts:
+  - `figures/stagee_heldout_budget_curve_with_k1.json`
+  - `figures/stagee_heldout_budget_curve_with_k1.png`
+  - `figures/stagee_heldout_budget_curve_with_k1.pdf`
+- Current aggregate after recovery:
+  - CAVER `N=25`: `n=3`, validation `0.217 +/- 0.005`, test `0.220 +/- 0.008`, primitive steps `659.7`
+  - CAVER `N=50`: `n=3`, validation `0.200 +/- 0.005`, test `0.223 +/- 0.003`, primitive steps `1338.3`
+  - CAVER `N=100`: `n=2`, validation `0.190 +/- 0.000`, test `0.230 +/- 0.007`, primitive steps `3716.0`
+  - matched real-only `K=4`, `N=25`: `n=3`, validation `0.213 +/- 0.005`, test `0.230 +/- 0.012`, primitive steps `7563.0`
+  - matched real-only `K=4`, `N=50`: `n=3`, validation `0.203 +/- 0.007`, test `0.213 +/- 0.003`, primitive steps `15194.0`
+  - matched real-only `K=4`, `N=100`: `n=3`, validation `0.217 +/- 0.012`, test `0.233 +/- 0.003`, primitive steps `30573.7`
+  - vanilla real-only `K=1`, `N=25`: `n=3`, validation `0.213 +/- 0.007`, test `0.227 +/- 0.003`, primitive steps `7521.3`
+- Remaining missing cells:
+  - CAVER `N=100`, seed `13` waits on active job `7117`
+  - vanilla real-only `K=1`, `N=50`, seeds `7`, `13`, `29`
+  - vanilla real-only `K=1`, `N=100`, seeds `7`, `13`, `29`
+- Current interpretation:
+  - CAVER still uses far less admitted backend data than real-only at every completed budget
+  - held-out test success is comparable rather than dominant: CAVER `N=25/50/100` is approximately `0.220/0.223/0.230`, matched real-only `K=4` is approximately `0.230/0.213/0.233`
+  - admitted-family concentration remains an issue: completed CAVER recovery cells still admit only `container_insertion_proxy`
+
+## Completion check after job 7117 on 2026-05-14
+
+- Slurm status:
+  - `7117` completed successfully in `18:00:05`
+  - no Stage-E GPU jobs remain in the queue
+- CAVER `N=100`, seed `13` result:
+  - validation `0.190`
+  - test `0.220`
+  - admitted contexts `20`
+  - primitive steps `2628`
+  - admitted families: `container_insertion_proxy: 20`
+- Refreshed curve artifacts:
+  - `figures/stagee_heldout_budget_curve_with_k1.json`
+  - `figures/stagee_heldout_budget_curve_with_k1.png`
+  - `figures/stagee_heldout_budget_curve_with_k1.pdf`
+- Complete CAVER curve:
+  - CAVER `N=25`: `n=3`, validation `0.217 +/- 0.005`, test `0.220 +/- 0.008`, primitive steps `659.7`
+  - CAVER `N=50`: `n=3`, validation `0.200 +/- 0.005`, test `0.223 +/- 0.003`, primitive steps `1338.3`
+  - CAVER `N=100`: `n=3`, validation `0.190 +/- 0.000`, test `0.227 +/- 0.005`, primitive steps `3353.3`
+- Matched real-only comparison:
+  - real-only `K=4`, `N=25`: test `0.230 +/- 0.012`, primitive steps `7563.0`
+  - real-only `K=4`, `N=50`: test `0.213 +/- 0.003`, primitive steps `15194.0`
+  - real-only `K=4`, `N=100`: test `0.233 +/- 0.003`, primitive steps `30573.7`
+- Remaining missing cells:
+  - vanilla real-only `K=1`, `N=50`, seeds `7`, `13`, `29`
+  - vanilla real-only `K=1`, `N=100`, seeds `7`, `13`, `29`
+- Current conclusion:
+  - CAVER has a complete `N={25,50,100}` curve now
+  - the result supports backend-data efficiency much more strongly than a dominant held-out success-rate claim
+  - CAVER uses about `10.9x` less primitive-step backend data than matched real-only at `N=100` while reaching comparable held-out test success
+  - the strongest remaining scientific caveat is task-family skew: most CAVER-admitted examples are still `container_insertion_proxy`, with only seed `29` at `N=100` also admitting `block_to_tray_proxy`
+
+## Vanilla K=1 and attribution expansion launch on 2026-05-14 15:07 MDT
+
+- Launcher fixes before submission:
+  - added `--run-label-suffix` to `submit_stage0_caver_lagged_budget.sh`
+  - extended `submit_stagee_heldout_budget_curve.py` with self-contained `selection_only` and `admission_only` methods
+  - extended `plot_stagee_heldout_budget_curve.py` so attribution results can be included later
+  - reason: the older parallel follow-on pack would have put `selection-only` and `admission-only` into the same run directory and used stale-prone dependent `afterok` jobs
+- Submission records:
+  - `logs/runtime/stagee_k1_n50_n100_submission.json`
+  - `logs/runtime/stagee_k1_n50_n100_submission.md`
+  - `logs/runtime/stagee_attribution_n50_submission.json`
+  - `logs/runtime/stagee_attribution_n50_submission.md`
+- Vanilla real-only `K=1` submitted on `gpu-l40s`:
+  - `7147`: `N=50`, seed `7`, time limit `23:00:00`
+  - `7150`: `N=50`, seed `13`, time limit `23:00:00`
+  - `7151`: `N=50`, seed `29`, time limit `23:00:00`
+  - `7154`: `N=100`, seed `7`, time limit `1-05:00:00`
+  - `7155`: `N=100`, seed `13`, time limit `1-05:00:00`
+  - `7157`: `N=100`, seed `29`, time limit `1-05:00:00`
+- Attribution submitted on `gpu-h200`:
+  - `7148`: selection-only, `N=50`, seed `7`, time limit `3-15:00:00`
+  - `7149`: selection-only, `N=50`, seed `13`, time limit `3-15:00:00`
+  - `7152`: selection-only, `N=50`, seed `29`, time limit `3-15:00:00`
+  - `7153`: admission-only, `N=50`, seed `7`, time limit `3-15:00:00`
+  - `7156`: admission-only, `N=50`, seed `13`, time limit `3-15:00:00`
+  - `7158`: admission-only, `N=50`, seed `29`, time limit `3-15:00:00`
+- Startup verification:
+  - all 12 jobs entered `RUNNING`
+  - K=1 logs show `candidate-count 1`, `selection-policy first`, `openpi-exact`, `H=4`
+  - selection-only logs show `selection_policy=caver_heuristic` and `admission_policy=all_executed_nonerror`
+  - admission-only logs show `selection_policy=uniform` and `admission_policy=success_lcb_v1`
+  - attribution runs use separate run directories with suffixes `selection-only` and `admission-only`
+- Conservative latest finish by Slurm limit:
+  - K=1 `N=50`: `2026-05-15 14:07 MDT`
+  - K=1 `N=100`: `2026-05-15 20:07 MDT`
+  - attribution `N=50`: `2026-05-18 06:07 MDT`
+- Next action:
+  - after jobs finish, regenerate held-out budget curves with methods `caver,real_only,real_only_k1,selection_only,admission_only`
+  - inspect attribution admission counts before drawing method conclusions
+
+## Vanilla K=1 completion and attribution recovery on 2026-05-18
+
+- Queue check:
+  - no old Stage-E GPU jobs remained after jobs `7147`-`7158`
+  - only the CPU interactive session was still running before recovery submission
+- Completed vanilla real-only `K=1` results:
+  - `N=50`, seeds `{7,13,29}` completed successfully
+  - validation `0.220 +/- 0.008`
+  - test `0.227 +/- 0.005`
+  - primitive steps `15237.7`
+  - demo items `3816.3`
+  - `N=100`, seeds `{7,13,29}` completed successfully
+  - validation `0.203 +/- 0.007`
+  - test `0.227 +/- 0.003`
+  - primitive steps `30445.0`
+  - demo items `7628.7`
+- Refreshed curve artifacts including `K=1`:
+  - `figures/stagee_heldout_budget_curve_with_k1.json`
+  - `figures/stagee_heldout_budget_curve_with_k1.png`
+  - `figures/stagee_heldout_budget_curve_with_k1.pdf`
+- Interpretation after adding `K=1`:
+  - vanilla real-only `K=1` is comparable to or slightly stronger than CAVER on held-out success at `N=50`
+  - this further supports the current Stage-E framing as backend-data/admission efficiency, not dominant held-out success
+  - CAVER still uses about `11x` less admitted primitive-step backend data at `N=50`
+- Attribution job diagnosis:
+  - selection-only jobs `7148`, `7149`, `7152` completed online collection and admitted all `50` contexts, but failed during the redundant in-round backend update with RLinf `RuntimeError: Cannot sample from an empty buffer`
+  - admission-only jobs `7153`, `7156`, `7158` completed online collection, but the LCB admission gate admitted `0/50` contexts for all seeds; post-train incorrectly treated the empty admitted trace as a hard error
+- Implementation fixes on 2026-05-18:
+  - `submit_stage0_caver_lagged_budget.sh` now supports `--finalizer-skip-backend-update`
+  - `submit_stagee_heldout_budget_curve.py` now uses that flag for CAVER-style curve jobs, so the round finalizer only builds artifacts and post-train remains the single backend update path
+  - `run_stage0_posttrain_from_round.sh` now treats zero-admission CAVER rounds as a valid no-update case and evaluates the base policy instead of converting an empty exact trace
+  - recovered missing selection-only `caver_round_summary.json` files from existing online/admission/demo/calibrator summaries with backend update marked skipped
+- Recovery post-train/eval jobs submitted:
+  - records: `logs/runtime/stagee_attribution_recovery_posttrain_20260518T103956-0600.json` and `.md`
+  - `7299`: selection-only, `N=50`, seed `7`, `gpu-l40s`, time limit `16:00:00`, latest by `2026-05-19 02:39:56 MDT`
+  - `7300`: selection-only, `N=50`, seed `13`, `gpu-l40s`, time limit `16:00:00`, latest by `2026-05-19 02:39:56 MDT`
+  - `7301`: selection-only, `N=50`, seed `29`, `gpu-l40s`, time limit `16:00:00`, latest by `2026-05-19 02:39:56 MDT`
+  - `7302`: admission-only, `N=50`, seed `7`, `gpu-l40s`, time limit `10:00:00`, latest by `2026-05-18 20:39:57 MDT`
+  - `7303`: admission-only, `N=50`, seed `13`, `gpu-l40s`, time limit `10:00:00`, latest by `2026-05-18 20:39:57 MDT`
+  - `7304`: admission-only, `N=50`, seed `29`, `gpu-l40s`, time limit `10:00:00`, latest by `2026-05-18 20:39:57 MDT`
+- Next action after recovery jobs finish:
+  - regenerate the held-out curve with `caver,real_only,real_only_k1,selection_only,admission_only`
+  - treat admission-only as a gate-stress diagnostic if it remains a no-update/base-policy result
+  - compare selection-only against matched real-only `K=4` to isolate whether the CAVER selector helps when admission is disabled
+
+## Additional ablations launched for the K=1 challenge on 2026-05-18
+
+- Motivation:
+  - vanilla real-only `K=1` is now a strong raw-success baseline
+  - CAVER's current mainline result mainly supports admitted/backend-data efficiency, not raw held-out dominance
+  - these ablations test whether the loss of raw-success advantage comes from the selector, the LCB admission gate, DR calibration, or GE-Sim/provider features
+- New implementation support:
+  - `success_only` admission policy in `build_caver_round_artifacts.py`
+  - `--skip-dr-calibrator-fit` in `run_stage0_caver_round.sh`
+  - `--disable-lagged-dr` in `run_stage0_caver_lagged_budget.py`
+  - `--disable-lagged-dr` and `--skip-dr-calibrator-fit` pass-through in `submit_stage0_caver_lagged_budget.sh`
+  - `no_dr`, `success_only`, and `no_provider` methods in `submit_stagee_heldout_budget_curve.py`
+  - plotting support for `no_dr`, `success_only`, and `no_provider` in `plot_stagee_heldout_budget_curve.py`
+- Ablations now running/submitted at `N=50`, seeds `{7,13,29}`:
+  - `no_dr`: CAVER selector/admission with the Stage-0 value proxy, but no lagged DR calibrator
+  - `success_only`: CAVER selector, but admit every successful non-error execution instead of applying the LCB gate
+  - `no_provider`: CAVER selector/admission with GE-Sim/provider summaries disabled
+- Submission records:
+  - `logs/runtime/stagee_no_dr_ablation_n50_20260518T105257-0600.json`
+  - `logs/runtime/stagee_no_dr_ablation_n50_20260518T105257-0600.md`
+  - `logs/runtime/stagee_success_only_ablation_n50_20260518T105257-0600.json`
+  - `logs/runtime/stagee_success_only_ablation_n50_20260518T105257-0600.md`
+  - `logs/runtime/stagee_no_provider_ablation_n50_20260518T105257-0600.json`
+  - `logs/runtime/stagee_no_provider_ablation_n50_20260518T105257-0600.md`
+- Initial H200 submission with `3-15:00:00` walltime was cancelled:
+  - cancelled jobs `7305`-`7313`
+  - reason: SDRE has an all-node maintenance reservation from `2026-05-19 08:00 MDT` to `2026-05-19 17:00 MDT`; jobs requesting longer than the pre-maintenance window could not start
+- Active resubmission with `20:00:00` walltime and exclusive H200 nodes:
+  - `7314`: `no_dr`, seed `7`, running on `h200-02`
+  - `7315`: `no_dr`, seed `13`, pending `afterany:7314`
+  - `7316`: `no_dr`, seed `29`, pending `afterany:7315`
+  - `7317`: `success_only`, seed `7`, running on `h200-05`
+  - `7318`: `success_only`, seed `13`, pending `afterany:7317`
+  - `7319`: `success_only`, seed `29`, pending `afterany:7318`
+  - `7320`: `no_provider`, seed `7`, running on `h200-06`
+  - `7321`: `no_provider`, seed `13`, pending `afterany:7320`
+  - `7322`: `no_provider`, seed `29`, pending `afterany:7321`
+- Latest finish estimates:
+  - first seed in each chain: by `2026-05-19 06:53 MDT` if they use the full walltime
+  - later seeds will likely wait until after the maintenance window if the first seeds use most of the walltime
+  - conservative chain completion target after maintenance: around `2026-05-21 09:00 MDT`, subject to scheduler availability
+- What to conclude from these ablations:
+  - if `success_only` beats mainline CAVER, the LCB gate is too conservative
+  - if `selection_only` beats `K=1` or `K=4`, the CAVER selector is useful but admission is the bottleneck
+  - if `no_dr` beats mainline CAVER, the lagged DR calibrator is currently harmful or undertrained
+  - if `no_provider` matches mainline CAVER, GE-Sim summaries are not adding useful signal in the current implementation
+
+## 2026-05-22 ablation progress check and L40S rerun
+
+- Current Slurm status at `2026-05-22 18:08 MDT`:
+  - no previous Stage-E GPU jobs were still active
+  - recovery jobs `7299`-`7304` completed successfully
+  - failed H200 ablation jobs `7314`-`7322` are no longer active
+- Recovery results now available:
+  - `selection_only`, `N=50`: validation `0.230 +/- 0.008`, test `0.223 +/- 0.003`, primitive steps `15138.7`, demo items `3792.7`
+  - `admission_only`, `N=50`: validation `0.207 +/- 0.007`, test `0.213 +/- 0.005`; this is a no-update/base-policy diagnostic because the LCB gate admitted zero contexts under uniform selection
+  - refreshed partial attribution curve artifacts:
+    - `figures/stagee_heldout_budget_curve_with_ablations.json`
+    - `figures/stagee_heldout_budget_curve_with_ablations.png`
+    - `figures/stagee_heldout_budget_curve_with_ablations.pdf`
+- Failed H200 ablation diagnosis:
+  - `7314`, `7317`, and `7320` completed online collection for seed `7`, but failed in exact backend post-train because exclusive H200 allocation exposed `actor_world_size=8` while `actor.global_batch_size=16` and `actor.micro_batch_size=4`
+  - `7315`, `7316`, `7318`, `7319`, `7321`, and `7322` failed early with RDSS `OSError: [Errno 5] Input/output error` during online-round logging
+  - conclusion: do not use exclusive H200 for these attribution reruns unless the global batch and visible GPU count are explicitly aligned
+- L40S rerun submitted without exclusive nodes:
+  - submission record: `logs/runtime/stagee_ablation_rerun_l40s_n50_20260522T1809-0600.json`
+  - submission summary: `logs/runtime/stagee_ablation_rerun_l40s_n50_20260522T1809-0600.md`
+  - `7491`: `no_dr`, `N=50`, seed `7`, `gpu-l40s`, running on `l40s-01`
+  - `7492`: `no_dr`, `N=50`, seed `13`, `gpu-l40s`, running on `l40s-01`
+  - `7493`: `no_dr`, `N=50`, seed `29`, `gpu-l40s`, running on `l40s-01`
+  - `7494`: `success_only`, `N=50`, seed `7`, `gpu-l40s`, running on `l40s-03`
+  - `7495`: `success_only`, `N=50`, seed `13`, `gpu-l40s`, running on `l40s-03`
+  - `7496`: `success_only`, `N=50`, seed `29`, `gpu-l40s`, running on `l40s-03`
+  - `7497`: `no_provider`, `N=50`, seed `7`, `gpu-l40s`, running on `l40s-02`
+  - `7498`: `no_provider`, `N=50`, seed `13`, `gpu-l40s`, running on `l40s-02`
+  - `7499`: `no_provider`, `N=50`, seed `29`, `gpu-l40s`, running on `l40s-02`
+- Walltime and expected finish:
+  - each rerun has a `3-00:00:00` walltime
+  - all nine jobs started immediately
+  - latest walltime-based finish estimate: `2026-05-25 18:09 MDT`
+- Next action after jobs finish:
+  - rerun `plot_stagee_heldout_budget_curve.py` with `caver,real_only,real_only_k1,selection_only,admission_only,success_only,no_dr,no_provider`
+  - update the Stage-E interpretation around whether CAVER's bottleneck is the selector, LCB gate, DR calibration, or provider signal
+
+## 2026-05-23 storage diagnosis and project-root rerun
+
+- Confirmed failure mode for the L40S ablation reruns `7491`-`7499`:
+  - the online rollout itself reached `25/25` contexts
+  - failure happened while closing or writing RDSS-backed outputs
+  - representative stack traces:
+    - `libero_remote_eval.py`: `transition_trace_handle.close()` raised `OSError: [Errno 5] Input/output error`
+    - trace files on RDSS were sparse zero-filled files, so those runs are not recoverable
+- Bridge fix implemented:
+  - `scripts/bridge/libero_remote_eval.py` now stages RDSS-backed streamed trace output to project-local storage and writes a tiny trace-source manifest at the requested final path
+  - the trace manifest is now serialized as a single JSON line so `build_caver_round_artifacts.py` can parse it
+- Smoke validation sequence:
+  - `7529` and `7530` were bridge smoke runs that proved the trace-close bug was fixed, but also exposed that later RDSS writes could still fail
+  - `7531` was the decisive smoke run on `gpu-l40s` with `run_root` and `log_root` moved to `/projects/...`
+  - `7531` completed successfully in `00:06:42`
+  - verified artifacts under `/projects/p57098/euijin1/caver_stagee_smoke_runs/stagee__caver-lagged__manifest-t_train_s0-all-trace-stage-smoke5-project__seed7__budget1__20260524T034838Z/results`:
+    - `caver_round_summary.json`
+    - `caver_online_eval.json`
+    - `caver_online_chunks.jsonl`
+    - `caver_selector_summary.json`
+    - `caver_admission_summary.json`
+    - `caver_round_demo.summary.json`
+    - `caver_dr_candidate_dataset.summary.json`
+    - `caver_lagged_dr_calibrator.summary.json`
+    - `lagged_round_chain.summary.json`
+- Conclusion:
+  - the bridge/storage bug is fixed
+  - the remaining practical issue is RDSS write reliability for these heavy Stage-E jobs
+  - for the missing ablation reruns, use project-backed `run_root`, `posttrain_root`, and Slurm log roots instead of RDSS
+- Submitter updates:
+  - `scripts/slurm/submit_stagee_heldout_budget_curve.py` now honors:
+    - `CAVER_STAGEE_RUN_ROOT`
+    - `CAVER_STAGEE_POSTTRAIN_ROOT`
+    - `CAVER_STAGEE_SLURM_LOG_ROOT`
+    - `CAVER_STAGEE_RUNTIME_LOG_ROOT`
+  - `scripts/stagee/plot_stagee_heldout_budget_curve.py` now accepts comma-separated `--posttrain-root` values so mixed RDSS and project-backed result trees can be plotted together
+- New project-root ablation rerun submitted:
+  - submission record: `logs/runtime/stagee_ablation_rerun_project_n50_20260523T2200-0600.json`
+  - submission summary: `logs/runtime/stagee_ablation_rerun_project_n50_20260523T2200-0600.md`
+  - project run root: `/projects/p57098/euijin1/caver_stagee_ablation_runs`
+  - project posttrain root: `/projects/p57098/euijin1/caver_stagee_ablation_posttrain`
+  - project Slurm log root: `/projects/p57098/euijin1/caver_stagee_ablation_logs/slurm`
+  - `7532`: `no_dr`, `N=50`, seed `7`
+  - `7533`: `no_dr`, `N=50`, seed `13`
+  - `7534`: `no_dr`, `N=50`, seed `29`
+  - `7535`: `success_only`, `N=50`, seed `7`
+  - `7536`: `success_only`, `N=50`, seed `13`
+  - `7537`: `success_only`, `N=50`, seed `29`
+  - `7538`: `no_provider`, `N=50`, seed `7`
+  - `7539`: `no_provider`, `N=50`, seed `13`
+  - `7540`: `no_provider`, `N=50`, seed `29`
+  - all nine jobs started immediately on `gpu-l40s`
+  - latest walltime-based finish estimate: `2026-05-26 21:58 MDT`
+- Storage findings behind that decision:
+  - `/projects` is on `wekafs`, shared filesystem size `91T`, used `24T`, available `68T`, inode use `1%`
+  - `/rdss` is on `nfs4`, shared filesystem size `3.6P`, used `1.6P`, available `2.0P`, inode use `21%`
+  - `/uhome` is also on `wekafs`, but home is not the right target for these heavy run artifacts
+  - exact quota tooling is not exposed in this shell: `quota` command is unavailable
+  - practical conclusion for Stage E:
+    - use `/projects` for active heavy write paths: run roots, posttrain roots, streamed traces, calibrator outputs, and Slurm logs
+    - keep `/rdss` for archival or smaller metadata where needed, but do not stream multi-GB JSONL or frequent training artifacts there during active runs
+- Current project-side footprint is modest relative to the known project allocation:
+  - `/projects/p57098/euijin1/caver_stagee_ablation_runs`: about `8.8G`
+  - `/projects/p57098/euijin1/caver_stagee_smoke_runs`: about `519M`
+  - `/projects/p57098/euijin1/caver_stagee_ablation_logs`: about `172K`
+  - `/rdss/p57098/euijin1/caver/runtime_logs`: about `8.3G`
+  - `/rdss/p57098/euijin1/caver/logs`: about `24M`
+
+## 2026-05-25 compact-trace recovery after failed ablation pack
+
+- Status of project-root rerun jobs `7532`-`7540`:
+  - all nine failed with Slurm exit code `120:0`
+  - no held-out posttrain summaries were produced
+  - logs show the jobs were terminated mid-LIBERO online execution, not during Python result aggregation
+  - partial traces were very large: each failed run wrote about `1.3G` to `2.7G` before completing round 1
+- Root-cause diagnosis:
+  - the trace JSONL records were operationally too heavy for the remaining ablation pack
+  - one no-provider trace record was about `14.4M` characters
+  - major payload contributors were full exact-policy auxiliary tensors and all primitive next-observation images
+  - this is not needed for the current chunk-step backend demo path
+- Storage cleanup:
+  - removed unusable partial project ablation outputs under `/projects/p57098/euijin1/caver_stagee_ablation_runs`
+  - removed explicit home cache/temp pressure from `/uhome`: stale `ray`, `pip`, `uv`, and `huggingface_rstar2agent` caches
+  - `/uhome` recovered from effectively full to about `13G` available
+  - `/projects` remains the preferred active-write target; `/rdss` remains archival only because active writes have produced I/O errors
+- Implementation recovery:
+  - recovered `scripts/bridge/libero_remote_eval.py` after a failed write attempt during the home-full condition
+  - restored the RDSS trace-manifest staging behavior
+  - added compact trace controls:
+    - `--trace-policy-aux-mode summary|none|full`, defaulting to compact `summary`
+    - `--trace-next-obs-mode last|all`
+  - `run_stage0_caver_round.sh` now defaults chunk-step demos to `--trace-next-obs-mode last`
+  - `convert_stage0_trace_to_rlinf_demo.py` now accepts compact chunk-step traces with only the final next observation
+- Validation job now running:
+  - job `7737`: compact-trace smoke, `gpu-l40s`, `l40s-01`
+  - run root: `/projects/p57098/euijin1/caver_stagee_compact_smoke/compact_trace_smoke_20260526T020213Z`
+  - latest walltime-based finish estimate: `2026-05-25 22:02 MDT`
+- Next gate:
+  - if `7737` completes and trace size is reduced, relaunch the missing `no_dr`, `success_only`, and `no_provider` `N=50` ablations with compact traces
+  - if `7737` still fails, inspect the compact smoke logs before submitting more jobs
+
+## 2026-05-25 compact-trace validation and ablation relaunch
+
+- Compact smoke result:
+  - job `7737` completed successfully in `00:04:24`
+  - compact trace wrote `43` records, total trace size `125 MB`, max JSONL line about `2.94M` characters
+  - the previous no-provider trace was about `14.4M` characters for a single record, so the compact path materially reduces write pressure
+  - produced valid online, selector, admission, DR-dataset, demo-conversion, and round-summary artifacts
+- Relaunch decision:
+  - relaunched missing `N=50` ablations with compact trace logging
+  - `no_provider` does not use GE-Sim, so it remains on `1 x L40S`
+  - `no_dr` and `success_only` use live GE-Sim provider summaries, so they were corrected to `2 x L40S` after the first one-GPU submission
+- Cancelled superseded one-GPU provider chains:
+  - `7738`-`7743`
+- Active compact ablation chains:
+  - `no_provider`: `7744 -> 7745 -> 7746`, `1 x L40S`, `afterany` chain
+  - `no_dr`: `7747 -> 7748 -> 7749`, `2 x L40S`, `afterany` chain
+  - `success_only`: `7750 -> 7751 -> 7752`, `2 x L40S`, `afterany` chain
+- Output roots:
+  - run root: `/projects/p57098/euijin1/caver_stagee_ablation_compact_runs`
+  - posttrain root: `/projects/p57098/euijin1/caver_stagee_ablation_compact_posttrain`
+  - Slurm log root: `/projects/p57098/euijin1/caver_stagee_ablation_compact_logs/slurm`
+  - runtime log root: `/projects/p57098/euijin1/caver_stagee_ablation_compact_runtime_logs`
+- Submission records:
+  - `logs/runtime/stagee_ablation_compact_no_provider_20260525T200830-0600.md`
+  - `logs/runtime/stagee_ablation_compact_no_dr_2gpu_20260525T200930-0600.md`
+  - `logs/runtime/stagee_ablation_compact_success_only_2gpu_20260525T200930-0600.md`
+- Conservative timing:
+  - each submitted cell has `3-15:00:00` walltime
+  - each method chain has three serial cells
+  - latest walltime-based finish for already-started chains, ignoring additional queue delay, is approximately `2026-06-05 17:10 MDT`
+  - expected actual runtime should be much shorter if compact traces prevent the previous I/O failure
+
+## 2026-05-25 post-relaunch progress and storage check
+
+- Slurm status:
+  - running: `7744` (`no_provider`, seed 7, `1 x L40S`), `7747` (`no_dr`, seed 7, `2 x L40S`), `7750` (`success_only`, seed 7, `2 x L40S`)
+  - pending by dependency: `7745`, `7746`, `7748`, `7749`, `7751`, `7752`
+  - cancelled superseded one-GPU provider attempts: `7738`-`7743`
+- Early health check:
+  - all three active jobs reached LIBERO online execution
+  - `no_provider` has completed at least two contexts and is writing compact traces normally
+  - current compact trace max-line sizes are about `2.9M` chars, versus about `14.4M` chars in the failed non-compact trace
+- Storage check:
+  - `/projects`: `91T` size, `68T` available, `27%` used
+  - `/rdss`: `3.6P` size, `2.0P` available, `46%` used
+  - `/tmp`: `7.0T` size, `6.9T` available, `2%` used
+  - active compact ablation outputs currently use about `413M` under `/projects/p57098/euijin1/caver_stagee_ablation_compact_runs`
+  - `/rdss/p57098/euijin1/home_cache_archive_20260525` is a partial abandoned archive of about `345M`
+- Storage policy:
+  - use `/projects` for active Stage-E write-heavy traces and posttrain outputs
+  - use `/rdss` only for archival copies or selected exports after jobs finish, because RDSS active JSONL streaming has already produced I/O errors in this workload
+- Stage-E status:
+  - not complete yet
+  - the remaining attribution pack is running and should be summarized only after `7744`-`7752` finish and the figure/table refresh succeeds
+
+## 2026-05-26 failed compact ablation diagnosis and trace-split fix
+
+- Completion check:
+  - `7744`, `7747`, and `7750` finished but failed with Slurm exit `120:0` after about `01:20`.
+  - dependent jobs `7745`, `7746`, `7748`, `7749`, `7751`, and `7752` did not produce usable outputs.
+- Diagnosis:
+  - no Python traceback was written in the Slurm logs.
+  - `/projects` global free space remained high, but project writes started returning `No space left on device`, indicating a quota/allocation pressure rather than a global filesystem-full condition.
+  - failed compact ablation outputs had grown to about `15G`, mostly JSON traces and provider bundles.
+  - compacting policy aux reduced per-record size, but inline observation arrays still made traces too large for robust repeated ablation runs.
+- Cleanup:
+  - removed unusable failed compact ablation outputs under `/projects/p57098/euijin1/caver_stagee_ablation_compact_*`.
+  - project writes are working again after cleanup.
+- Implementation fix:
+  - restored `scripts/bridge/libero_remote_eval.py` after the failed write zeroed the file.
+  - added split trace output:
+    - compact selector/DR trace: `caver_online_chunks.jsonl`, with observations omitted.
+    - full demo trace: `caver_online_demo_chunks.jsonl`, used only for admitted backend demo conversion.
+  - updated the artifact builder and lagged wrapper so final admission uses the compact selector trace but filters admitted records from the full demo trace.
+  - moved Stage-E inline job runtime logs, staging, and `TMPDIR` to project-backed paths instead of RDSS defaults.
+- Validation job:
+  - submitted one-context trace-split smoke job `7827` on `gpu-l40s`; it failed immediately because `sbatch --wrap` used `/bin/sh` and rejected `set -o pipefail`.
+  - resubmitted the same smoke through `bash -lc` as job `7828`; it failed before execution because the single-round script received the lagged-wrapper-only flag `--finalizer-skip-backend-update`.
+  - resubmitted with the correct single-round flag `--skip-backend-update` as job `7829`.
+  - output root: `/projects/p57098/euijin1/caver_stagee_trace_split_smoke`.
+  - walltime request: `02:00:00`; latest walltime-based finish estimate for `7829` is `2026-05-26 17:20 MDT`.
+- Next gate:
+  - if `7827` completes and selector trace size is small while demo trace remains valid, relaunch the ablation pack with the split-trace path.
+  - if `7827` fails, inspect the smoke logs before submitting more jobs.
+
+## 2026-05-26 trace-split smoke passed and ablations relaunched
+
+- Trace-split smoke result:
+  - job `7829` completed successfully in `00:04:29` on `gpu-l40s`.
+  - compact selector/DR trace `caver_online_chunks.jsonl`: `38` records, about `0.5M`, with observation arrays omitted.
+  - full demo trace `caver_online_demo_chunks.jsonl`: `38` records, about `111M`, retaining observations for backend demo conversion.
+  - admitted demo conversion succeeded with `38` demo items and `149` primitive steps.
+- Relaunched missing attribution ablations with the split-trace path:
+  - `success_only`: `7830 -> 7834 -> 7836`, `gpu-h200`, `2 x H200`, serial `afterany` chain.
+  - `no_provider`: `7831 -> 7833 -> 7837`, `gpu-l40s`, `1 x L40S`, serial `afterany` chain.
+  - `no_dr`: `7832 -> 7835 -> 7838`, `gpu-h200`, `2 x H200`, serial `afterany` chain.
+- Current status at `2026-05-26 15:36 MDT`:
+  - running: `7830` on `h200-06`, `7831` on `l40s-01`.
+  - pending for resources: `7832`.
+  - pending on dependencies: `7833`, `7834`, `7835`, `7836`, `7837`, `7838`.
+- Output roots:
+  - run root: `/projects/p57098/euijin1/caver_stagee_ablation_split_runs`
+  - posttrain root: `/projects/p57098/euijin1/caver_stagee_ablation_split_posttrain`
+  - Slurm log root: `/projects/p57098/euijin1/caver_stagee_ablation_split_logs/slurm`
+  - runtime log root: `/projects/p57098/euijin1/caver_stagee_ablation_split_runtime_logs`
+- Storage check:
+  - `/projects`: `91T` size, `67T` available, `27%` used.
+  - `/rdss`: `3.6P` size, `2.0P` available, `46%` used.
+  - `/tmp`: `7.0T` size, `6.9T` available, `2%` used.
+  - active split-ablation footprint is still tiny at launch time; the large historical footprint is `/projects/p57098/euijin1/Caver/runs` at about `1.6T`.
+  - RDSS remains archival-only for this workload; active Stage-E JSONL writes stay on `/projects`.
+- Conservative timing:
+  - each cell requests `3-15:00:00`.
+  - latest walltime-based finish for the serial chains launched at `2026-05-26 15:34 MDT` is approximately `2026-06-06 12:34 MDT`, ignoring further resource queue delay.
+  - expected actual runtime should be much shorter if split tracing removes the previous write-pressure failure.
+- Stage-E status:
+  - not complete yet.
+  - the remaining attribution result gate is the successful completion and summarization of jobs `7830`-`7838`.
+
+## 2026-05-26 split-ablation rerun failed; success-filter smoke submitted
+
+- Completion check for jobs `7830`-`7838`:
+  - `7830` (`success_only`, seed 7, `2 x H200`) failed with exit `120:0` after `01:48:23`.
+  - `7831` (`no_provider`, seed 7, `1 x L40S`) failed with exit `120:0` after `01:47:46`.
+  - `7832`-`7838` did not produce usable outputs; Slurm reports exit `0:53` / cancelled child steps after the parent failures.
+- Diagnosis:
+  - no Python traceback was emitted.
+  - the jobs were killed while still in online LIBERO collection, before held-out post-training summaries existed.
+  - the split path fixed selector/DR trace size, but full observation-bearing demo traces were still too large for these long ablation cells.
+  - largest failed files were multi-GB `caver_online_demo_chunks.jsonl` traces; failed output root reached about `15G`.
+- Cleanup:
+  - removed unusable `/projects/p57098/euijin1/caver_stagee_ablation_split_runs` and split posttrain roots.
+  - retained small Slurm/runtime logs for diagnosis.
+- Code fix:
+  - restored `scripts/bridge/libero_remote_eval.py` after a failed write zeroed it.
+  - added `--demo-trace-write-policy success_only` support: compact selector/DR traces remain complete, while full demo traces are written only for successful contexts.
+  - `run_stage0_caver_round.sh` now passes `--demo-trace-write-policy success_only` for Stage-E CAVER-style rounds.
+- Validation jobs submitted:
+  - `7839`: success-context smoke on `gpu-l40s`, verifies successful contexts still produce demo traces.
+  - `7840`: failure-context smoke on `gpu-l40s`, dependency `afterany:7839`, verifies failed contexts do not write full demo traces.
+  - root: `/projects/p57098/euijin1/caver_stagee_successfilter_smoke_20260526`.
+  - submitted at `2026-05-26 17:34 MDT`; each requests `02:00:00`; latest walltime-based finish is approximately `2026-05-26 21:34 MDT`.
+- Next gate:
+  - if `7839` and `7840` pass, relaunch the missing `success_only`, `no_provider`, and `no_dr` ablations with the success-filtered demo trace path.
+  - if either smoke fails, inspect the smoke logs before submitting more Stage-E jobs.
+
+## 2026-05-26 success-filter smoke passed and attribution pack relaunched
+
+- Wrapper correction:
+  - jobs `7839` and `7840` failed immediately because the first smoke used `sbatch --wrap` under `/bin/sh`, which rejected `set -o pipefail`.
+  - replacement smoke jobs were submitted as explicit bash Slurm scripts.
+- Success-filter smoke validation:
+  - `7841` completed in `00:04:27` on `gpu-l40s`.
+  - `7842` completed in `00:04:36` on `gpu-l40s`.
+  - both rejected/non-admitted contexts produced compact selector/DR traces of about `1.3M` and wrote `0` bytes to the full demo trace, confirming the large failed-context trace is removed.
+  - targeted admitted-context smoke `7843` completed in `00:03:52` on `gpu-l40s`.
+  - `7843` produced a compact selector/DR trace of about `0.4M`, a full demo trace of about `87M`, and a converted backend demo with `30` demo items.
+  - compact traces contain no `"obs"` or `"image"` payload keys; full demo traces retain observations only for admitted backend conversion.
+- Storage and environment check at relaunch:
+  - `/projects`: `91T` size, `67T` available, `27%` used.
+  - `/rdss`: `3.6P` size, `2.0P` available, `46%` used.
+  - `/tmp`: `7.0T` size, `6.9T` available, `2%` used.
+  - idle L40S nodes were available; H200 nodes had mixed capacity.
+- Relaunched missing attribution ablations with fresh success-filter roots:
+  - run root: `/projects/p57098/euijin1/caver_stagee_ablation_successfilter_runs`
+  - posttrain root: `/projects/p57098/euijin1/caver_stagee_ablation_successfilter_posttrain`
+  - Slurm log root: `/projects/p57098/euijin1/caver_stagee_ablation_successfilter_logs/slurm`
+  - runtime log root: `/projects/p57098/euijin1/caver_stagee_ablation_successfilter_runtime_logs`
+  - no-provider chain: `7845 -> 7849 -> 7852`, `gpu-l40s`, `1 x L40S`.
+  - success-only chain: `7844 -> 7847 -> 7851`, `gpu-h200`, `2 x H200`.
+  - no-DR chain: `7846 -> 7848 -> 7850`, `gpu-h200`, `2 x H200`.
+- Submission metadata:
+  - `logs/runtime/stagee_ablation_successfilter_no_provider_20260526.md`
+  - `logs/runtime/stagee_ablation_successfilter_success_only_2h200_20260526.md`
+  - `logs/runtime/stagee_ablation_successfilter_no_dr_2h200_20260526.md`
+- Queue status at `2026-05-26 17:52 MDT`:
+  - running: `7844`, `7845`, `7846`.
+  - pending on dependencies: `7847`, `7848`, `7849`, `7850`, `7851`, `7852`.
+  - all dependencies use `afterany`, not `afterok`, to avoid stale `DependencyNeverSatisfied` jobs.
+- Conservative timing:
+  - each cell requests `3-15:00:00`.
+  - each method chain has three serial cells.
+  - latest walltime-based finish for the relaunched chains is approximately `2026-06-06 14:52 MDT`, ignoring additional queue delay.
+  - expected runtime should be shorter if success-filtered demo tracing removes the previous write-pressure failure.
+- Stage-E status:
+  - not closed.
+  - next gate is successful completion of `7844`-`7852`, then regenerate attribution summaries, figures, tables, and paper text if the results materially change.
+
+## 2026-05-27 Stage-E attribution rerun storage failure and gzip recovery
+
+- Completion check for jobs `7844`-`7852`:
+  - `7844` (`success_only`, seed 7, `2 x H200`) failed with exit `120:0` after `01:51:35`.
+  - `7845` (`no_provider`, seed 7, `1 x L40S`) failed with exit `120:0` after `01:51:10`.
+  - `7846` (`no_dr`, seed 7, `2 x H200`) failed with exit `120:0` after `01:51:12`.
+  - `7847`-`7852` did not produce usable outputs.
+- Diagnosis:
+  - no Python traceback was written.
+  - failure occurred during online collection / finalization, before usable posttrain summaries existed.
+  - `/projects` project-quota view was full: `4.6T` used out of `4.6T`, despite the global `/projects` filesystem still having free capacity.
+  - the immediate cause was storage pressure from historical raw observation JSONL traces plus new large successful-context demo traces.
+- Cleanup:
+  - removed unusable failed success-filter run and posttrain roots.
+  - removed old raw Stage-E JSONL traces under `/projects/p57098/euijin1/Caver/runs`:
+    - file patterns removed: `caver_online_chunks.jsonl`, `caver_admitted_chunks.jsonl`, `real_only_online_chunks.jsonl`, `stage0_seed_warm_start_chunks.jsonl`.
+    - removal list: `/tmp/caver_deleted_old_raw_stagee_jsonl_20260527T121814.txt`.
+    - approximate reclaimed quota: `1.6T`.
+  - current project-quota view after cleanup: `/projects` quota `4.6T` size, `3.1T` used, `1.6T` available, `67%` used.
+  - `/rdss` remains archival-only for this workload; active Stage-E JSONL streaming stays on `/projects`.
+- Code recovery:
+  - restored `scripts/bridge/libero_remote_eval.py` after a failed write had zeroed the file.
+  - added gzip support for full demo traces:
+    - online full-demo trace now defaults to `caver_online_demo_chunks.jsonl.gz`.
+    - admitted trace now defaults to `caver_admitted_chunks.jsonl.gz`.
+    - compact selector/DR trace remains plain `caver_online_chunks.jsonl` with observations omitted.
+  - added `.gz` read support in:
+    - `scripts/stagee/build_caver_round_artifacts.py`
+    - `scripts/stage0/convert_stage0_trace_to_rlinf_demo.py`
+    - `scripts/stagee/run_stage0_caver_lagged_budget.py`
+  - compile check passed for the patched Python files, and `run_stage0_caver_round.sh` passed `bash -n`.
+- Gzip validation:
+  - smoke job `7880` completed successfully in `00:05:08` on `l40s-01`.
+  - compact trace size: about `0.4M`.
+  - gzip full-demo trace size: about `10M`.
+  - gzip admitted trace size: about `10M`.
+  - admitted conversion and DR dataset construction both succeeded.
+- Relaunched missing attribution ablations with gzip roots:
+  - run root: `/projects/p57098/euijin1/caver_stagee_ablation_gzip_runs`
+  - posttrain root: `/projects/p57098/euijin1/caver_stagee_ablation_gzip_posttrain`
+  - Slurm log root: `/projects/p57098/euijin1/caver_stagee_ablation_gzip_logs/slurm`
+  - runtime log root: `/projects/p57098/euijin1/caver_stagee_ablation_gzip_runtime_logs`
+  - no-provider: `7903 -> 7904 -> 7909`, `gpu-l40s`, `1 x L40S`.
+  - success-only: `7901 -> 7906 -> 7908`, `gpu-h200`, `2 x H200`.
+  - no-DR: `7902 -> 7905 -> 7907`, `gpu-h200`, `2 x H200`.
+- Queue status at `2026-05-27 12:29 MDT`:
+  - running: `7903` on `l40s-01`.
+  - pending by priority: `7901`, `7902`.
+  - pending by dependency: `7904`, `7905`, `7906`, `7907`, `7908`, `7909`.
+  - `7903` has passed exact-policy startup and is writing compact transition records.
+  - follow-up health poll at `2026-05-27 12:31 MDT`: `7903` completed context `1/25` successfully and started context `2/25`; compact trace was about `0.9M` and gzip full-demo trace about `16M`, so the storage fix is behaving at early runtime.
+- Conservative timing:
+  - each cell requests `3-15:00:00`; each method chain has three serial cells.
+  - latest walltime-based finish for the relaunched chains is approximately `2026-06-07 09:27 MDT`, ignoring queue delay.
+  - expected runtime should be much shorter if gzip prevents quota pressure.
+- Stage-E status:
+  - not closed.
+  - current gate is successful completion of `7901`-`7909`, then regenerate attribution summaries, figures, tables, and paper text if the results materially change.
+
+## 2026-05-29 gzip ablation completion check and exact-payload fix
+
+- Completion check for jobs `7901`-`7909`:
+  - all GPU jobs are finished, but all nine Slurm jobs ended as `FAILED` with exit `1:0`.
+  - the online CAVER rounds completed and wrote useful online/admission artifacts.
+  - failure occurred after the online rounds, during the posttrain / exact-offline finalization path.
+- Storage status at `2026-05-29 10:51 MDT`:
+  - `/projects` project-quota view: `4.6T` size, `3.2T` used, `1.5T` available, `69%` used.
+  - global `/projects`: `100T` size, `76T` available.
+  - `/rdss`: `3.6P` size, `1.9P` available.
+  - `/tmp`: `6.9T` available.
+  - storage is no longer the active blocker.
+- Diagnosis:
+  - first exact posttrain error was a path mismatch: posttrain still defaulted to `caver_admitted_chunks.jsonl` while the patched round code writes `caver_admitted_chunks.jsonl.gz`.
+  - after fixing gzip path handling, a conversion smoke showed a stricter issue:
+    - existing `7901`-`7909` admitted traces contain `selected_policy_aux.forward_inputs`, but only in summary form.
+    - they are missing exact NFT tensors such as `nft_xt`, `nft_v`, `nft_xnext`, `nft_step_index`, and `nft_noise_level`.
+  - root cause:
+    - `trace-policy-aux-mode=summary` was applied to both compact selector traces and full demo traces.
+    - this is fine for selector/DR logging but not sufficient for proposal-mainline `exact_offline_nft` backend training.
+- Code fix:
+  - `scripts/stagee/run_stage0_posttrain_from_round.sh` now prefers `caver_admitted_chunks.jsonl.gz` for CAVER exact traces and validates gzip traces correctly.
+  - `scripts/stagee/convert_stagee_trace_to_offline_rollout_batch.py` now reads `.jsonl.gz` traces and trace-source manifests.
+  - `scripts/bridge/libero_remote_eval.py` now separates compact selector-trace aux from demo-trace aux:
+    - compact selector/DR trace can stay `summary`.
+    - full demo trace keeps policy aux `full` by default so exact NFT tensors are retained.
+  - `scripts/stagee/run_stage0_caver_round.sh` now passes `--demo-trace-policy-aux-mode full`.
+  - compile and shell syntax checks passed.
+- Validation job submitted:
+  - job `8216`, `stagee-exact-smoke`, on `gpu-l40s`, `1 x L40S`.
+  - root: `/projects/p57098/euijin1/caver_stagee_exactpayload_smoke_20260529`.
+  - log root: `/projects/p57098/euijin1/caver_stagee_exactpayload_smoke_20260529_logs`.
+  - purpose:
+    - run one no-provider CAVER context with compact selector trace and full exact demo trace.
+    - convert the resulting `caver_admitted_chunks.jsonl.gz` into an exact offline rollout batch.
+  - submitted at `2026-05-29 10:51 MDT`.
+  - requested walltime: `02:00:00`.
+  - latest walltime-based finish estimate: `2026-05-29 12:51 MDT`.
+- Stage-E status:
+  - still open.
+  - if `8216` passes, relaunch the attribution pack because the `7901`-`7909` online traces are not exact-backend-valid.
+  - if `8216` fails, inspect the exact payload in the smoke trace before spending more Slurm time.
+
+## 2026-05-29 exact-payload smoke passed and attribution pack relaunched
+
+- Smoke result:
+  - job `8216` completed successfully in `00:12:57` on `l40s-01`.
+  - compact selector trace: about `0.6M`.
+  - full exact demo trace: about `61M`.
+  - admitted exact trace: about `61M`.
+  - exact offline rollout conversion succeeded:
+    - output: `/projects/p57098/euijin1/caver_stagee_exactpayload_smoke_20260529/results/exact_rollout_smoke.pt`
+    - summary: `/projects/p57098/euijin1/caver_stagee_exactpayload_smoke_20260529/results/exact_rollout_smoke.summary.json`
+    - verified tensor keys include `nft_xt`, `nft_v`, `nft_xnext`, `nft_step_index`, and `nft_noise_level`.
+- Relaunched corrected attribution pack with exact-payload demo traces:
+  - run root: `/projects/p57098/euijin1/caver_stagee_ablation_exactpayload_runs`
+  - posttrain root: `/projects/p57098/euijin1/caver_stagee_ablation_exactpayload_posttrain`
+  - Slurm log root: `/projects/p57098/euijin1/caver_stagee_ablation_exactpayload_logs/slurm`
+  - runtime log root: `/projects/p57098/euijin1/caver_stagee_ablation_exactpayload_runtime_logs`
+  - success-only: `8217 -> 8220 -> 8224`, `gpu-h200`, `2 x H200`, serial `afterany` chain.
+  - no-DR: `8218 -> 8221 -> 8225`, `gpu-h200`, `2 x H200`, serial `afterany` chain.
+  - no-provider: `8219 -> 8222 -> 8223`, `gpu-l40s`, `1 x L40S`, serial `afterany` chain.
+- Submission records:
+  - `logs/runtime/stagee_ablation_exactpayload_success_only_20260529.json`
+  - `logs/runtime/stagee_ablation_exactpayload_success_only_20260529.md`
+  - `logs/runtime/stagee_ablation_exactpayload_no_dr_20260529.json`
+  - `logs/runtime/stagee_ablation_exactpayload_no_dr_20260529.md`
+  - `logs/runtime/stagee_ablation_exactpayload_no_provider_20260529.json`
+  - `logs/runtime/stagee_ablation_exactpayload_no_provider_20260529.md`
+- Queue status at `2026-05-29 11:09 MDT`:
+  - running: `8217` and `8218` on `h200-03`; `8219` on `l40s-01`.
+  - pending by dependency: `8220`, `8221`, `8222`, `8223`, `8224`, `8225`.
+  - follow-up health poll at `2026-05-29 11:11 MDT`: `8217`, `8218`, and `8219` remained running; `8219` had begun writing compact online chunks, and no immediate Slurm failure was present.
+- Conservative timing:
+  - each cell requests `3-15:00:00`; each method chain has three serial cells.
+  - latest walltime-based finish for the three chains is approximately `2026-06-09 08:09 MDT`, ignoring additional queue delay.
+  - expected runtime should be much shorter if the exact-payload gzip path remains stable.
+- Stage-E status:
+  - still open.
+  - current gate is successful completion of `8217`-`8225`, then regenerate attribution summaries/figures and update the paper only if attribution changes the interpretation.
+
+## 2026-05-29 exact-payload progress check and one-GPU recovery
+
+- Queue check at `2026-05-29 23:30 MDT`:
+  - running:
+    - `8220`: success-only, seed `13`, on `h200-03`
+    - `8221`: no-DR, seed `13`, on `h200-03`
+    - `8222`: no-provider, seed `13`, on `l40s-01`
+    - `8265`: recovery posttrain for success-only seed `7`, on `h200-02`
+  - pending by dependency:
+    - `8223`: no-provider, seed `29`
+    - `8224`: success-only, seed `29`
+    - `8225`: no-DR, seed `29`
+    - `8266`: recovery posttrain for no-DR seed `7`
+- Completed usable attribution result so far:
+  - `8219`: no-provider seed `7`, completed in `08:36:42` on `l40s-01`
+  - online success: `20/50 = 0.400`
+  - admitted contexts: `18/50`
+  - admitted exact trace records: `654`
+  - exact rollout batch contexts: `18`
+  - held-out validation: `22/100 = 0.220`
+  - held-out test: `21/100 = 0.210`
+- Seed-`7` failures diagnosed:
+  - `8217`: success-only seed `7`, failed after `11:36:52`
+  - `8218`: no-DR seed `7`, failed after `09:06:10`
+  - both failures occurred after exact trace conversion, during backend training
+  - root cause:
+    - exact offline rollout batch contexts were not divisible by `num_splits=2` for the two-GPU H200 posttrain path
+    - success-only admitted `19` contexts
+    - no-DR admitted `1` context
+  - this is a backend split divisibility issue, not an online collection, gzip trace, or exact-payload issue
+- Recovery submitted:
+  - failed quick attempt:
+    - `8263 -> 8264` failed immediately due a shell quoting bug in an `sbatch --wrap` recovery command
+    - these jobs are superseded and should be ignored
+  - active explicit-script recovery:
+    - `8265`: success-only seed `7`, one H200, `18:00:00`, running
+    - `8266`: no-DR seed `7`, one H200, `18:00:00`, pending `afterany:8265`
+  - recovery scripts:
+    - [stagee_recovery_success_only_s7_20260529.sbatch](/projects/p57098/euijin1/Caver/logs/runtime/stagee_recovery_success_only_s7_20260529.sbatch)
+    - [stagee_recovery_no_dr_s7_20260529.sbatch](/projects/p57098/euijin1/Caver/logs/runtime/stagee_recovery_no_dr_s7_20260529.sbatch)
+- Storage check:
+  - `/projects`: `76T` globally available
+  - `/rdss`: `1.9P` available
+  - `/tmp`: `6.9T` available
+  - no current storage-pressure signal was seen during this check
+- Updated conservative finish estimates:
+  - recovery chain `8265 -> 8266`: latest walltime-only finish about `2026-05-31 10:15 MDT`, ignoring queue delay
+  - remaining attribution chains `8220`-`8225`: latest walltime-only finish about `2026-06-06 05:00 MDT`, ignoring queue delay
+- Current Stage-E gate:
+  - Stage E remains open.
+  - The next decision point is after `8220`-`8225` and `8265`-`8266` finish.
+  - If later success-only or no-DR cells admit an odd number of contexts and fail with the same `num_splits=2` issue, recover their posttrain with the same one-GPU exact-offline path rather than rerunning online collection.
+
+## 2026-05-31 exact-payload attribution completion check
+
+- GPU jobs from the prior wave are finished:
+  - completed:
+    - `8221`: no-DR seed `13`, completed in `12:21:24`
+    - `8222`: no-provider seed `13`, completed in `08:57:30`
+    - `8223`: no-provider seed `29`, completed in `08:47:25`
+    - `8225`: no-DR seed `29`, completed in `12:47:36`
+    - `8265`: success-only seed `7` one-GPU recovery, completed in `04:27:03`
+    - `8266`: no-DR seed `7` one-GPU recovery, completed in `03:41:06`
+  - failed:
+    - `8220`: success-only seed `13`, failed after `11:39:37`
+    - `8224`: success-only seed `29`, failed after `12:21:18`
+- Failure diagnosis:
+  - `8220` and `8224` hit the same backend split issue as success-only seed `7`
+  - exact rollout batch size was `19`, which is not divisible by `num_splits=2`
+  - online collection and exact trace conversion completed, so no online rerun is needed
+- Current usable attribution results:
+  - no-provider has all three seeds:
+    - seed `7`: validation `0.220`, test `0.210`, online `0.400`, admitted contexts `18`
+    - seed `13`: validation `0.210`, test `0.230`, online `0.400`, admitted contexts `19`
+    - seed `29`: validation `0.200`, test `0.220`, online `0.380`, admitted contexts `17`
+    - mean held-out test: `0.220 +/- 0.006`
+  - no-DR has all three seeds:
+    - seed `7`: validation `0.210`, test `0.220`, online `0.400`, admitted contexts `1`
+    - seed `13`: validation `0.210`, test `0.230`, online `0.400`, backend update skipped because no admitted data
+    - seed `29`: validation `0.230`, test `0.230`, online `0.400`, backend update skipped because no admitted data
+    - mean held-out test: `0.227 +/- 0.003`
+    - interpretation caution: two no-DR seeds skipped backend update, so the result mostly says that this ablation starves the admission/update path rather than cleanly improving the policy
+  - success-only currently has seed `7` recovered:
+    - validation `0.210`, test `0.230`, online `0.380`, admitted contexts `19`
+- New recovery chain submitted:
+  - `8290`: success-only seed `13`, one H200, `18:00:00`, running on `h200-03`
+  - `8291`: success-only seed `29`, one H200, `18:00:00`, pending `afterany:8290`
+  - recovery scripts:
+    - [stagee_recovery_success_only_s13_20260531.sbatch](/projects/p57098/euijin1/Caver/logs/runtime/stagee_recovery_success_only_s13_20260531.sbatch)
+    - [stagee_recovery_success_only_s29_20260531.sbatch](/projects/p57098/euijin1/Caver/logs/runtime/stagee_recovery_success_only_s29_20260531.sbatch)
+- Storage check at `2026-05-31 01:57 MDT`:
+  - `/projects`: `76T` globally available
+  - `/rdss`: `1.9P` available
+  - `/tmp`: `6.9T` available
+  - storage is not the blocker
+- Updated finish estimate:
+  - `8290 -> 8291` latest walltime-only finish is about `2026-06-01 14:00 MDT`, ignoring queue delay
+- Current Stage-E gate:
+  - Stage E remains open until `8290` and `8291` finish and the attribution table/figure refresh is regenerated.
+
+## 2026-06-01 Stage-E attribution complete
+
+- Final recovery jobs completed:
+  - `8290`: success-only seed `13`, completed in `04:26:18` on `h200-03`
+  - `8291`: success-only seed `29`, completed in `04:44:23` on `h200-03`
+- GPU queue status:
+  - no Stage-E GPU jobs remain running
+  - only a CPU interactive allocation was visible in `squeue`
+- Final `N=50` attribution summary over seeds `{7, 13, 29}`:
+  - CAVER mainline:
+    - held-out test `0.223 +/- 0.003`
+    - held-out validation `0.200 +/- 0.005`
+    - admitted demo items `338.0`
+    - primitive steps `1338.3`
+  - real-only K=4:
+    - held-out test `0.213 +/- 0.003`
+    - held-out validation `0.203 +/- 0.007`
+    - admitted demo items `3807.0`
+    - primitive steps `15194.0`
+  - vanilla real-only K=1:
+    - held-out test `0.227 +/- 0.005`
+    - held-out validation `0.220 +/- 0.008`
+    - admitted demo items `3816.3`
+    - primitive steps `15237.7`
+  - selection-only:
+    - held-out test `0.223 +/- 0.003`
+    - held-out validation `0.230 +/- 0.008`
+    - admitted demo items `3792.7`
+    - primitive steps `15138.7`
+  - admission-only:
+    - held-out test `0.213 +/- 0.005`
+    - held-out validation `0.207 +/- 0.007`
+  - success-only admission:
+    - held-out test `0.233 +/- 0.003`
+    - held-out validation `0.213 +/- 0.003`
+    - admitted demo items `769.3`
+    - primitive steps `3049.3`
+  - no-DR:
+    - held-out test `0.227 +/- 0.003`
+    - held-out validation `0.217 +/- 0.005`
+    - admitted demo items `29.0`
+    - primitive steps `114.0`
+    - caveat: seeds `13` and `29` skipped backend update because no data was admitted, so this ablation is best read as admission/update starvation rather than a clean policy improvement
+  - no-provider:
+    - held-out test `0.220 +/- 0.005`
+    - held-out validation `0.210 +/- 0.005`
+    - admitted demo items `661.7`
+    - primitive steps `2613.7`
+- Refreshed artifacts:
+  - `figures/stagee_heldout_budget_curve_with_ablations.json`
+  - `figures/stagee_heldout_budget_curve_with_ablations.png`
+  - `figures/stagee_heldout_budget_curve_with_ablations.pdf`
+  - plot source contains `42` complete cells and `30` missing cells
+  - missing cells are expected because attribution ablations were run at `N=50` only, while mainline / K=1 curves cover `N={25, 50, 100}`
+- Interpretation:
+  - Stage-E is complete for the simulation-side evidence currently planned.
+  - The result does not support a dominant raw-success-rate claim for mainline CAVER.
+  - The defensible claim remains sample-efficiency / backend-data efficiency: CAVER uses much less admitted backend data while staying near the main baselines.
+  - Attribution suggests the conservative admission rule is doing most of the useful compression; the provider and DR components do not show a clear raw-performance advantage at `N=50` in this simulation proxy.
+  - Success-only admission is the strongest raw held-out test ablation at `N=50`, but it admits about `2.3x` more backend data than mainline CAVER and should be framed as an ablation / possible hardware-pilot variant, not as the proposal-mainline result.
+- Stage-E closure:
+  - close Stage E as complete.
+  - proceed to Stage F readiness / PiPER shadow-mode planning.
+  - carry a paper caveat that Stage-0 supports a selective-admission and data-efficiency story, not a claim that mainline CAVER dominates all baselines in held-out success.
+
+## Stage E+: pre-Stage-F K=1 challenge and method-improvement gate
+
+- Updated decision after review:
+  - Stage E mainline is complete as an evidence package, but it is not strong enough to proceed directly to Stage F as the final method.
+  - The vanilla real-only `K=1` baseline is a real methodological threat:
+    - `K=1`, `N=50`: held-out test `0.227 +/- 0.005`
+    - mainline CAVER, `N=50`: held-out test `0.223 +/- 0.003`
+    - success-only admission, `N=50`: held-out test `0.233 +/- 0.003`
+  - The next pre-Stage-F goal is to convert the success-only/admission insight into a proposal-aligned CAVER variant that is Pareto-competitive with `K=1`.
+- Target criterion before Stage F:
+  - a revised CAVER variant should satisfy at least one of:
+    - raw held-out test success at least matching vanilla `K=1` at the same `N`
+    - `CAVER@25` approximately matching or exceeding `K=1@50`
+    - same held-out success band as `K=1` while using at most about `25%` of `K=1` admitted backend data
+  - if none holds, the paper should remain a data-compression systems result and should not proceed to hardware as a strong sample-efficiency claim.
+- Method variants to test before Stage F:
+  - `caver_success_preserving`:
+    - keep CAVER's provider-aware selector and DR/calibrator diagnostics
+    - admit every verified successful execution instead of discarding successes with low LCB
+    - use LCB only for ranking, diagnostics, and optional caps
+    - motivation: current `success-only` ablation beats `K=1` at `N=50` while using about `769 / 3816 = 20%` of the admitted demo items
+  - `caver_relaxed_lcb`:
+    - keep LCB admission but relax `kappa` / `tau`
+    - target admission rate: roughly `15-20` successful contexts at `N=50`, not the current `10`
+    - motivation: current mainline appears over-conservative
+  - `caver_top_m_success`:
+    - admit the top `M` successful contexts per budget or per round by calibrated LCB
+    - candidate values for `N=50`: `M in {12, 15, 19}`
+    - this is a controlled bridge between mainline CAVER and success-only admission
+  - `caver_family_balanced_admission`:
+    - add per-family minimums or per-family thresholds when successes exist
+    - motivation: strict mainline admissions concentrate too heavily in `container_insertion_proxy`
+  - `caver_k1_guarded_selector`:
+    - include the vanilla first policy sample as an explicit incumbent candidate
+    - sample only the remaining `K-1` candidates as alternatives
+    - fall back to the incumbent when CAVER's score margin is small or calibrated uncertainty is high
+    - motivation: prevent CAVER selection from discarding the strong vanilla action when provider/calibrator evidence is weak
+- Execution order:
+  1. Reprocess existing exact-payload traces where possible for admission-only changes:
+     - `caver_success_preserving`
+     - `caver_relaxed_lcb`
+     - `caver_top_m_success`
+     - `caver_family_balanced_admission`
+  2. Run posttrain/eval for the best reprocessed variants at `N=50`, seeds `{7,13,29}`.
+  3. Expand the best one or two variants to `N in {25,100}`.
+  4. Only if reprocessing does not beat `K=1`, implement and run `caver_k1_guarded_selector`, because it requires new online collection.
+- Current best immediate candidate:
+  - `caver_success_preserving` is the highest-priority variant because it already has evidence at `N=50`:
+    - held-out test `0.233 +/- 0.003`
+    - admitted demo items `769`, still about `5x` less than vanilla `K=1`
+  - this variant should be treated as the first method-improvement candidate, not merely as a side ablation.
+- Stage-F gate:
+  - Stage F hardware work should wait until Stage E+ identifies the preferred CAVER variant.
+  - PiPER environment planning can continue on paper, but no real seed collection or pilot should start until the `K=1` challenge is resolved or explicitly accepted as a limitation.
+
+### Stage E+ active run log: `caver_top_m_success(M=15)`
+
+- Timestamp: `2026-06-01 20:52 MDT`
+- Rationale:
+  - `success-only` already beats vanilla `K=1` slightly at `N=50`, but admits all successful CAVER-selected contexts.
+  - `caver_top_m_success(M=15)` tests whether CAVER can keep the success-preserving advantage while admitting fewer successes by calibrated LCB rank.
+  - Existing exact-payload CAVER-selection traces are reused; no new online LIBERO collection is required for this admission-only variant.
+- Code status:
+  - `scripts/stagee/build_caver_round_artifacts.py` now supports:
+    - `caver_success_preserving`
+    - `caver_relaxed_lcb`
+    - `caver_top_m_success`
+    - `caver_family_balanced_success`
+    - `--skip-admitted-trace-write` for fast summary-only admission smoke tests
+  - `scripts/stagee/run_stage0_caver_round.sh` now forwards admission overrides into the artifact builder.
+  - `scripts/slurm/submit_stage0_caver_round_reprocess.sh` now supports lagged-wrapper reprocessing, admission overrides, and CPU-only `--gpus 0` artifact jobs.
+- Smoke result:
+  - source: exact-payload `success-only` CAVER-selection trace, seed `7`, `N=50`
+  - policy: `caver_top_m_success`, `M=15`
+  - result: admitted `15 / 50` contexts and `548` exact trace records
+  - admitted families: `block_to_tray_proxy=6`, `container_insertion_proxy=9`
+  - summary-only smoke passed; temporary plain multi-GB admitted trace was removed.
+- Submitted CPU-only reprocess jobs:
+  - job `8385`, seed `7`, partition `cpu`, run dir `/projects/p57098/euijin1/caver_stagee_plus_reprocess_runs/stagee__caver-reprocess__stagee__caver-lagged__manifest-t_train_s0-all-success-only__seed7__budget50__20260529t170854z__seed7__budget50__20260602T025222Z`
+  - job `8386`, seed `13`, partition `cpu`, run dir `/projects/p57098/euijin1/caver_stagee_plus_reprocess_runs/stagee__caver-reprocess__stagee__caver-lagged__manifest-t_train_s0-all-success-only__seed13__budget50__20260529t170854z__seed13__budget50__20260602T025222Z`
+  - job `8387`, seed `29`, partition `cpu`, run dir `/projects/p57098/euijin1/caver_stagee_plus_reprocess_runs/stagee__caver-reprocess__stagee__caver-lagged__manifest-t_train_s0-all-success-only__seed29__budget50__20260529t170855z__seed29__budget50__20260602T025223Z`
+- Estimate:
+  - requested walltime: `4:00:00`
+  - conservative latest finish: about `2026-06-02 00:52 MDT`
+  - expected finish: likely earlier if compressed admitted-trace extraction stays near the summary/plain smoke benchmark
+- Progress check:
+  - `2026-06-01 21:05 MDT`: jobs `8385`, `8386`, and `8387` still running on `cpu-01`
+  - builder processes are CPU-bound in `build_caver_round_artifacts.py`
+  - compressed admitted traces are growing normally:
+    - seed `7`: about `209M`
+    - seed `13`: about `207M`
+    - seed `29`: about `224M`
+  - no stderr failure is visible; `caver_admission_summary.json` is expected only after the admitted trace write completes
+- Next after jobs finish:
+  - verify `caver_admission_summary.json` and `caver_admitted_chunks.jsonl.gz` for all three seeds
+  - submit dependent exact-offline posttrain/eval jobs on `gpu-l40s`
+  - compare `top_m_success(M=15)` against vanilla `K=1`, success-only, and mainline CAVER at `N=50`
+
+### Stage E+ posttrain/eval run log: `caver_top_m_success(M=15)`
+
+- Timestamp: `2026-06-02 00:19 MDT`
+- Reprocess verification:
+  - jobs `8385`, `8386`, and `8387` completed successfully on `cpu-01`
+  - exit code: `0:0` for all three
+  - elapsed time:
+    - seed `7`: `00:50:37`
+    - seed `13`: `00:50:17`
+    - seed `29`: `00:51:34`
+- Reprocessed admission artifacts:
+  - seed `7`:
+    - contexts admitted: `15 / 50`
+    - exact trace records: `548`
+    - compressed trace size: about `676M`
+    - admitted families: `block_to_tray_proxy=6`, `container_insertion_proxy=9`
+  - seed `13`:
+    - contexts admitted: `15 / 50`
+    - exact trace records: `538`
+    - compressed trace size: about `665M`
+    - admitted families: `block_to_tray_proxy=5`, `container_insertion_proxy=10`
+  - seed `29`:
+    - contexts admitted: `15 / 50`
+    - exact trace records: `586`
+    - compressed trace size: about `724M`
+    - admitted families: `block_to_tray_proxy=5`, `container_insertion_proxy=10`
+- Submitted exact-offline posttrain/eval jobs:
+  - job `8391`, seed `7`, partition `gpu-l40s`, artifact root `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed7_budget50_20260602`
+  - job `8392`, seed `13`, partition `gpu-l40s`, artifact root `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed13_budget50_20260602`
+  - job `8393`, seed `29`, partition `gpu-l40s`, artifact root `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed29_budget50_20260602`
+- Runtime notes:
+  - jobs use `exact_offline_nft`
+  - held-out evaluation partitions: `T_val_S0`, `T_test_S0`
+  - chunk horizon remains proposal-aligned at `H=4`
+  - jobs were submitted independently with no dependency chain to avoid stale `DependencyNeverSatisfied` queue states
+  - all three started on `l40s-01`
+- Estimate:
+  - requested walltime: `12:00:00`
+  - conservative latest finish: about `2026-06-02 12:19 MDT`
+  - expected finish: likely earlier if conversion/training/eval follows previous Stage-E posttrain runtimes
+- Startup check:
+  - `2026-06-02 00:21 MDT`: jobs `8391`, `8392`, and `8393` were all `RUNNING` on `l40s-01`
+  - stderr logs were empty at startup
+  - stdout confirmed all three jobs entered `exact_offline_nft` trace conversion:
+    - seed `7`: `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed7_budget50_20260602/posttrain_exact_rollout_batch.pt`
+    - seed `13`: `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed13_budget50_20260602/posttrain_exact_rollout_batch.pt`
+    - seed `29`: `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed29_budget50_20260602/posttrain_exact_rollout_batch.pt`
+- Next after jobs finish:
+  - aggregate `posttrain_holdout_summary.json` from the three artifact roots
+  - compare `top_m_success(M=15)` with:
+    - vanilla `K=1`, `N=50`: test `0.227 +/- 0.005`
+    - success-only, `N=50`: test `0.233 +/- 0.003`
+    - mainline CAVER, `N=50`: test `0.223 +/- 0.003`
+  - decide whether to expand `top_m_success` to `N in {25,100}` or implement `caver_k1_guarded_selector`
+
+### Stage E+ recovery log: project-backed exact rollout batches
+
+- Timestamp: `2026-06-02 15:48 MDT`
+- Status of prior posttrain/eval jobs:
+  - jobs `8391`, `8392`, and `8393` all finished but failed before backend training
+  - failure point: RLinf attempted to `torch.load()` the generated `posttrain_exact_rollout_batch.pt`
+  - observed error: `KeyError: "filename 'storages' not found"` from PyTorch serialization; seed `13` additionally exited with a segmentation fault after the same load failure
+  - diagnosis: large `.pt` files written directly to RDSS were not valid PyTorch archives even though the conversion summary JSON was written
+- Storage rule added for future Stage-E exact posttrain runs:
+  - store large `posttrain_exact_rollout_batch.pt` files on `/projects`, not RDSS
+  - RDSS remains acceptable for Slurm logs, summaries, checkpoints, and held-out eval JSON, but not for direct large `torch.save` rollout batches
+- Code hardening:
+  - `scripts/stagee/convert_stagee_trace_to_offline_rollout_batch.py` now reload-validates the saved `.pt` immediately after `torch.save`
+  - if the saved file cannot be reloaded, the converter fails before GPU training begins and emits a storage-path diagnostic
+- Submitted CPU conversion recovery jobs:
+  - job `8430`, seed `7`, partition `cpu`
+    - output batch: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed7_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+  - job `8431`, seed `13`, partition `cpu`
+    - output batch: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed13_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+  - job `8432`, seed `29`, partition `cpu`
+    - output batch: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed29_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+- Estimate:
+  - requested walltime: `2:00:00`
+  - conservative latest finish: about `2026-06-02 17:48 MDT`
+  - expected finish: about `2026-06-02 16:40 MDT` if conversion follows the prior 50-minute reprocess runtime
+- Next after conversion jobs finish:
+  - verify each project-backed `.pt` reloads successfully
+  - resubmit exact-offline posttrain/eval on `gpu-l40s` with `--exact-rollout-batch-path` pointing to the project-backed `.pt`
+  - use new RDSS artifact roots with suffix `projectpt_v1` to avoid reusing corrupted failed artifacts
+
+### Stage E+ posttrain/eval rerun: `caver_top_m_success(M=15, projectpt_v1)`
+
+- Timestamp: `2026-06-02 15:56 MDT`
+- Conversion recovery result:
+  - jobs `8430`, `8431`, and `8432` completed successfully on `cpu-01`
+  - elapsed time:
+    - seed `7`: `00:06:01`
+    - seed `13`: `00:06:00`
+    - seed `29`: `00:06:33`
+  - all three conversion summaries report `output_load_validated=true`
+  - project-backed exact rollout batch sizes:
+    - seed `7`: `197M`, `15` contexts, `548` records, `2174` primitive steps
+    - seed `13`: `210M`, `15` contexts, `538` records, `2131` primitive steps
+    - seed `29`: `232M`, `15` contexts, `586` records, `2314` primitive steps
+- Submitted exact-offline GPU posttrain/eval recovery jobs:
+  - job `8433`, seed `7`, partition `gpu-l40s`
+    - artifact root: `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed7_budget50_20260602_projectpt_v1`
+    - batch path: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed7_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+  - job `8434`, seed `13`, partition `gpu-l40s`
+    - artifact root: `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed13_budget50_20260602_projectpt_v1`
+    - batch path: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed13_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+  - job `8435`, seed `29`, partition `gpu-l40s`
+    - artifact root: `/rdss/p57098/euijin1/caver/stagee_plus_posttrain/topm15_seed29_budget50_20260602_projectpt_v1`
+    - batch path: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed29_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+- Runtime notes:
+  - these jobs skip trace conversion and consume the validated project-backed `.pt` files directly
+  - proposal-aligned exact backend remains `exact_offline_nft`
+  - proposal-aligned chunk horizon remains `H=4`
+  - no node exclusion was used
+- Estimate:
+  - requested walltime: `12:00:00`
+  - conservative latest finish: about `2026-06-03 03:56 MDT`
+  - expected finish: likely sooner if training/evaluation follows the prior exact posttrain path after the `.pt` load issue is removed
+- Next after jobs finish:
+  - verify `posttrain_holdout_summary.json` for all three seeds
+  - aggregate `top_m_success(M=15)` against vanilla `K=1`, success-only, and mainline CAVER at `N=50`
+  - use the outcome to decide whether this method-side improvement is enough to close Stage E+ or whether the next variant should be `caver_k1_guarded_selector`
+- Startup check:
+  - `2026-06-02 16:05 MDT`: jobs `8433`, `8434`, and `8435` were all still `RUNNING` after about `9` minutes on `l40s-01`
+  - this passes the prior failure window: jobs `8391`-`8393` failed at about `7` minutes while loading corrupted RDSS `.pt` files
+  - artifact roots now contain `posttrain_train/`, indicating the project-backed exact rollout batches were accepted and backend training started
+  - cleanup: two stale RDSS-wide diagnostic `find` commands from earlier storage checks were killed because they were unrelated to the experiment and could add metadata load
+- Training check:
+  - `2026-06-02 16:06 MDT`: Slurm logs confirm RLinf/FSDP actor initialization and offline batch training are active
+  - seed `7` log reached `Global Step: 4/20`, so the previous `.pt` load failure is fixed for this rerun
+  - runtime warning observed: `offline NFT batch contains step index 4 beyond configured num_steps=4; using inferred num_steps=5 for schedule construction`
+  - interpretation: this is an exact-NFT internal schedule warning, not an environment chunk-horizon failure; keep it as a follow-up consistency check after results land
+  - `2026-06-02 16:17 MDT`: jobs `8433`, `8434`, and `8435` remained `RUNNING` at about `20` minutes, confirming the RDSS `.pt` load failure is no longer the active blocker
+- Completion check:
+  - `2026-06-02 18:12 MDT`: jobs `8433`, `8434`, and `8435` all finished but failed with exit code `255:0`
+  - elapsed times:
+    - seed `7`: `00:36:30`
+    - seed `13`: `00:39:38`
+    - seed `29`: `00:42:35`
+  - new failure point: distributed checkpoint save, after offline batch training reached the final checkpoint step
+  - log evidence: `torch.distributed.checkpoint.api.CheckpointException` wrapping `OSError: [Errno 5] Input/output error` in `os.fsync(stream.fileno())`
+  - diagnosis: the project-backed `.pt` input fix worked, but RDSS is also unsafe for RLinf/FSDP distributed checkpoint output in this workload
+  - resulting rule: for exact-offline posttrain, both `posttrain_exact_rollout_batch.pt` and the full posttrain artifact root/checkpoint path should live on `/projects`; RDSS should be limited to lightweight logs and copied summaries
+- Recovery decision:
+  - rerun the same `caver_top_m_success(M=15)` exact-offline posttrain/eval jobs with artifact roots under `/projects/p57098/euijin1/caver_stagee_plus_posttrain/`
+  - keep Slurm stdout/stderr on RDSS
+  - do not reuse the partial RDSS checkpoints for evaluation
+
+### Stage E+ posttrain/eval rerun: `caver_top_m_success(M=15, projectartifacts_v1)`
+
+- Timestamp: `2026-06-02 18:13 MDT`
+- Submitted exact-offline GPU posttrain/eval jobs:
+  - job `8442`, seed `7`, partition `gpu-l40s`
+    - artifact root: `/projects/p57098/euijin1/caver_stagee_plus_posttrain/topm15_seed7_budget50_20260602_projectartifacts_v1`
+    - batch path: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed7_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+  - job `8443`, seed `13`, partition `gpu-l40s`
+    - artifact root: `/projects/p57098/euijin1/caver_stagee_plus_posttrain/topm15_seed13_budget50_20260602_projectartifacts_v1`
+    - batch path: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed13_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+  - job `8444`, seed `29`, partition `gpu-l40s`
+    - artifact root: `/projects/p57098/euijin1/caver_stagee_plus_posttrain/topm15_seed29_budget50_20260602_projectartifacts_v1`
+    - batch path: `/projects/p57098/euijin1/caver_stagee_plus_exact_batches/topm15_seed29_budget50_20260602_projectpt_v1/posttrain_exact_rollout_batch.pt`
+- Runtime notes:
+  - no dependency chain was used
+  - no node exclusion was used
+  - this rerun keeps large PyTorch input batches, FSDP checkpoints, exported checkpoint, and held-out eval artifacts on `/projects`
+  - RDSS is used only for lightweight Slurm stdout/stderr
+- Estimate:
+  - requested walltime: `12:00:00`
+  - conservative latest finish: about `2026-06-03 06:13 MDT`
+  - expected training checkpoint point: about `2026-06-02 18:55 MDT`, based on the failed RDSS-checkpoint runs reaching final checkpoint in `36-43` minutes
+- Next check:
+  - verify jobs start and reach training
+  - specifically verify the final checkpoint save succeeds on `/projects`
+  - if checkpoint save succeeds, export and held-out eval should proceed without needing another training rerun
+- Startup check:
+  - `2026-06-02 18:19 MDT`: jobs `8442`, `8443`, and `8444` were all `RUNNING` on `l40s-01`
+  - logs confirm training commands now use `/projects` for:
+    - `runner.logger.log_path`
+    - `posttrain_checkpoint`
+    - held-out validation/test result JSON
+    - held-out validation/test context logs
+  - all three jobs reached at least `Global Step: 1/20`; no immediate storage or load failure observed
+- Checkpoint-save check:
+  - `2026-06-02 18:49 MDT`: job `8442` remained running and successfully wrote the project-backed final checkpoint artifacts:
+    - `actor/dcp_checkpoint/__0_0.distcp` around `11.8G`
+    - `actor/dcp_checkpoint/.metadata`
+    - `actor/model_state_dict/full_weights.pt` around `8.5G`
+    - `posttrain_checkpoint_export.summary.json`
+  - this confirms the RDSS checkpoint-save failure is fixed when the artifact root is on `/projects`
+  - jobs `8443` and `8444` were still running and had not yet materialized their final checkpoint files at this poll
+  - `2026-06-02 19:00 MDT`: jobs `8442`, `8443`, and `8444` all remained running and all three seeds had successfully written:
+    - project-backed DCP checkpoint data
+    - DCP metadata
+    - `actor/model_state_dict/full_weights.pt`
+    - `posttrain_checkpoint_export.summary.json`
+  - the RDSS checkpoint-save failure is confirmed fixed for all three seeds
+  - next active phase is held-out validation/test evaluation
+- Eval-progress check:
+  - `2026-06-02 19:21 MDT`: jobs `8442`, `8443`, and `8444` still running normally
+  - seed `7` is actively running held-out validation and reached at least context `24/100`
+  - validation/test artifacts are project-backed; no RDSS checkpoint or eval-output write failure observed
+  - current rough finish estimate: `2026-06-02 22:30-23:30 MDT`, depending on per-context LIBERO rollout length for the remaining validation and test episodes
+
+### Stage E+ result: `caver_top_m_success(M=15)`
+
+- Timestamp: `2026-06-03 11:46 MDT`
+- Final job status:
+  - `8442`: seed `7`, completed in `03:43:14`, exit `0:0`
+  - `8443`: seed `13`, completed in `03:46:25`, exit `0:0`
+  - `8444`: seed `29`, completed in `03:48:32`, exit `0:0`
+- Storage conclusion:
+  - project-backed exact batches and project-backed posttrain artifact roots solved both failure modes:
+    - corrupted large RDSS `.pt` rollout batch loads
+    - RDSS FSDP distributed-checkpoint `fsync` failures
+  - rule for future exact-offline posttrain: put large PyTorch rollout batches, checkpoints, exports, and eval artifacts on `/projects`; use RDSS only for lightweight logs or copied summaries
+- Top-M15 aggregate at `N=50`, seeds `{7,13,29}`:
+  - online success: `0.380 +/- 0.000`
+  - held-out validation: `0.210 +/- 0.005`
+  - held-out test: `0.217 +/- 0.005`
+  - admitted contexts: `15.0 +/- 0.0` out of `50`
+  - admitted demo items: `557.3`
+  - primitive steps: `2206.3`
+- Comparison at `N=50`:
+  - vanilla real-only `K=1`: test `0.227 +/- 0.005`, primitive steps `15237.7`
+  - mainline CAVER: test `0.223 +/- 0.003`, primitive steps `1338.3`
+  - success-only admission: test `0.233 +/- 0.003`, primitive steps `3049.3`
+  - Top-M15 success admission: test `0.217 +/- 0.005`, primitive steps `2206.3`
+- Interpretation:
+  - Top-M15 is not the improvement we need; capping admitted successes at `15` reduces backend data but also loses held-out test performance
+  - success-only admission remains the strongest Stage-E+ candidate so far because it beats vanilla `K=1` on held-out test while using about `20%` of the backend primitive steps
+  - the next method-side option, if we continue improving before Stage F, should be either:
+    - family-balanced success-preserving admission, to prevent success-only from overfitting to easy families
+    - `K=1`-guarded CAVER selection, to directly address the vanilla `K=1` challenge at the candidate-selection level
+- Refreshed figure/table artifacts:
+  - `figures/stagee_heldout_budget_curve_with_ablations.json`
+  - `figures/stagee_heldout_budget_curve_with_ablations.png`
+  - `figures/stagee_heldout_budget_curve_with_ablations.pdf`
+- Code updates:
+  - `scripts/stagee/plot_stagee_heldout_budget_curve.py` now includes `top_m_success`
+  - `scripts/stagee/run_stage0_posttrain_from_round.sh` now attaches sibling exact-rollout summary metadata when `--exact-rollout-batch-path` reuses a prebuilt batch
+
+### Stage E+ family diagnosis and next selector variant
+
+- Timestamp: `2026-06-03 12:36 MDT`
+- New diagnostic artifacts:
+  - `logs/runtime/stagee_family_comparison_n50.json`
+  - `logs/runtime/stagee_family_comparison_n50.md`
+- Family-level finding:
+  - success-only admission is the best raw held-out variant so far, but its admitted training contexts are concentrated in two families:
+    - block-to-tray: `28` admitted contexts across three seeds
+    - container-insertion: `29` admitted contexts across three seeds
+    - two-object-stack: `0` admitted contexts
+    - relocate-to-region: `0` admitted contexts
+    - drawer-open: `0` admitted contexts
+  - held-out test by family shows the same hard-family weakness:
+    - success-only: block-to-tray `0.417`, container-insertion `0.683`, two-object-stack `0.017`
+    - vanilla `K=1`: block-to-tray `0.367`, container-insertion `0.700`, two-object-stack `0.000`
+    - mainline CAVER: block-to-tray `0.400`, container-insertion `0.700`, two-object-stack `0.000`
+- Decision:
+  - do not run a pure family-balanced success-preserving reprocess on the current traces
+  - reason: the current online traces contain zero successful stack/drawer/region executions, so balancing among successful executions cannot create useful positives for those families
+  - next useful method-side variant is `caver_k1_guarded`: keep a vanilla `K=1` anchor by assigning candidate `0` a fixed mixture mass while still allocating the remaining probability according to CAVER
+- Implementation status:
+  - `scripts/bridge/libero_remote_eval.py` now supports `--selection-policy caver_k1_guarded`
+  - guarded policy uses stochastic propensities: `p = 0.5 * one_hot(candidate_0) + 0.5 * p_CAVER`
+  - `scripts/stagee/run_stage0_caver_round.sh` now accepts `caver_k1_guarded`
+  - syntax checks and a synthetic selector-probability smoke test passed
+- Next:
+  - submit a small exact-payload online smoke with `max_contexts=2`, `selection_policy=caver_k1_guarded`, `admission_policy=success_only`
+  - if the smoke passes, submit the full `N=50`, three-seed guarded run
+
+### Active Stage E+ smoke: `caver_k1_guarded`
+
+- Timestamp: `2026-06-03 12:40 MDT`
+- Submitted Slurm job:
+  - job id: `8474`
+  - partition/node: `gpu-l40s` / `l40s-01`
+  - requested walltime: `04:00:00`
+  - latest Slurm end time: `2026-06-03 16:37 MDT`
+  - expected finish: much sooner than the walltime because this is a two-context exact-payload smoke with backend update skipped
+- Purpose:
+  - verify the new `caver_k1_guarded` selector in the real Stage-E online execution path
+  - confirm exact selector probabilities are logged with candidate-0 mixture mass
+  - confirm `success_only` admission and finalizer-skip-backend-update remain compatible with the guarded selector
+- Decision rule:
+  - if job `8474` exits `0:0` and logs valid guarded propensities, launch the full `N=50`, three-seed `caver_k1_guarded + success_only` run
+  - if it fails, inspect Slurm and run logs before launching any full run
+- Prepared follow-up launcher:
+  - [scripts/slurm/submit_stagee_k1_guarded_success_only_n50_online.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stagee_k1_guarded_success_only_n50_online.sh)
+  - submits seeds `{7,13,29}` in parallel on `gpu-l40s` by default
+  - uses `selection_policy=caver_k1_guarded`, `admission_policy=success_only`, exact rollout payloads, proposal-pinned `H=4`, and project-backed run/log roots
+  - skips backend update intentionally; exact-offline posttrain/eval will be launched only after the three online traces are validated
+- Smoke-progress check:
+  - timestamp: `2026-06-03 12:44 MDT`
+  - job `8474` still running normally on `l40s-01`
+  - partial trace has `35` chunk records and is still growing
+  - sampled trace confirms:
+    - `selection_policy = caver_k1_guarded`
+    - `selector_mode = lagged_dr_calibrated_softmax_v1__k1_guarded_mixture_v1`
+    - guarded candidate-0 probability is elevated, e.g. `[0.598, 0.017, 0.026, 0.359]`
+- Smoke result:
+  - timestamp: `2026-06-03 13:18 MDT`
+  - job `8474` completed successfully: `COMPLETED`, exit `0:0`, elapsed `00:37:44`
+  - online smoke success: `2/2` contexts
+  - selector context records: `2`
+  - policy-query probability vectors: `95`
+  - guarded probability invariant passed:
+    - all probability vectors sum to `1.0`
+    - candidate `0` probability min/mean/max: `0.515 / 0.623 / 0.900`
+    - all candidate `0` probabilities are `>= 0.5`
+  - artifact path passed:
+    - selector summary written
+    - admission summary written
+    - DR candidate dataset written
+    - lagged DR calibrator fit written
+    - final round summary written
+  - backend update was skipped in the finalizer via `--skip-backend-update`; exact-offline posttrain remains a separate project-backed step
+
+### Active Stage E+ full online run: `caver_k1_guarded + success_only`, `N=50`
+
+- Timestamp: `2026-06-03 13:20 MDT`
+- Submitted with:
+  - [scripts/slurm/submit_stagee_k1_guarded_success_only_n50_online.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stagee_k1_guarded_success_only_n50_online.sh)
+  - `selection_policy=caver_k1_guarded`
+  - `admission_policy=success_only`
+  - `K=4`, `H=4`, exact rollout payloads
+  - `round_size=25`, `N=50`
+  - backend update skipped; posttrain/eval remains a later project-backed step after trace validation
+- Slurm jobs:
+  - `8480`: seed `7`, `gpu-l40s`, `l40s-01`, started `2026-06-03 13:18:20 MDT`
+  - `8481`: seed `13`, `gpu-l40s`, `l40s-01`, started `2026-06-03 13:18:21 MDT`
+  - `8482`: seed `29`, `gpu-l40s`, `l40s-01`, started `2026-06-03 13:18:21 MDT`
+- Requested walltime:
+  - `24:00:00`
+  - latest Slurm end time: `2026-06-04 13:18 MDT`
+  - rough expected finish: `2026-06-04 01:00-09:00 MDT`, depending on LIBERO episode lengths and GE-Sim query counts
+- Run roots:
+  - seed `7`: `/projects/p57098/euijin1/caver_stagee_k1_guarded_runs/stagee__caver-lagged__manifest-t_train_s0-all-k1-guarded-success-only-n50__seed7__budget50__20260603T191819Z`
+  - seed `13`: `/projects/p57098/euijin1/caver_stagee_k1_guarded_runs/stagee__caver-lagged__manifest-t_train_s0-all-k1-guarded-success-only-n50__seed13__budget50__20260603T191820Z`
+  - seed `29`: `/projects/p57098/euijin1/caver_stagee_k1_guarded_runs/stagee__caver-lagged__manifest-t_train_s0-all-k1-guarded-success-only-n50__seed29__budget50__20260603T191820Z`
+- Next check:
+  - verify all three jobs connect to OpenPI and start LIBERO context `1/25` for round `1`
+  - while running, monitor `caver_online_chunks.jsonl` growth under each `round_001`
+  - after completion, validate guarded propensities and admitted traces before launching exact-offline posttrain/eval
+- Startup check:
+  - timestamp: `2026-06-03 13:21 MDT`
+  - all three jobs are running
+  - `8480`, seed `7`: connected to OpenPI port `26480`, started LIBERO context `1/25`
+  - `8481`, seed `13`: connected to OpenPI port `26481`, started LIBERO context `1/25`
+  - `8482`, seed `29`: connected to OpenPI port `26482`, started LIBERO context `1/25`
+  - no startup failure or port collision observed
+
+### Stage E+ full online result: `caver_k1_guarded + success_only`, `N=50`
+
+- Timestamp: `2026-06-03 23:49 MDT`
+- Slurm completion:
+  - `8480`: seed `7`, completed `0:0`, elapsed `09:19:03`
+  - `8481`: seed `13`, completed `0:0`, elapsed `09:15:06`
+  - `8482`: seed `29`, completed `0:0`, elapsed `09:23:46`
+- Online collection summary:
+  - seed `7`: online `20/50 = 0.400`, admitted contexts `20`, demo items `816`, primitive steps `3225`
+  - seed `13`: online `19/50 = 0.380`, admitted contexts `19`, demo items `787`, primitive steps `3114`
+  - seed `29`: online `19/50 = 0.380`, admitted contexts `19`, demo items `805`, primitive steps `3189`
+  - mean online success: `0.387`
+  - mean admitted contexts: `19.3 / 50`
+  - mean demo items: `802.7`
+  - mean primitive steps: `3176.0`
+- Family distribution:
+  - admitted successes remain concentrated in:
+    - block-to-tray: `10, 9, 9`
+    - container-insertion: `10, 10, 10`
+  - zero admitted successes in stack/drawer/region families
+  - interpretation: guarded selection preserves the `K=1` incumbent but does not create positives for hard families in this run
+- Guarded-propensity validation:
+  - seed `7`: `3816` probability vectors, candidate-0 min/mean/max `0.514 / 0.623 / 0.926`
+  - seed `13`: `3887` probability vectors, candidate-0 min/mean/max `0.514 / 0.625 / 0.927`
+  - seed `29`: `3905` probability vectors, candidate-0 min/mean/max `0.514 / 0.621 / 0.927`
+  - all probability vectors summed to `1.0`
+  - all candidate-0 probabilities were `>= 0.5`
+- Posttrain submission note:
+  - jobs `8524`, `8525`, `8526` failed immediately because method token `k1guarded` is not accepted by `run_stage0_posttrain_from_round.sh`
+  - no training or evaluation work was done in those failed jobs
+  - corrected submission uses `--method caver` while preserving `k1guarded_*` artifact-root names
+
+### Active Stage E+ posttrain/eval: `caver_k1_guarded + success_only`, `N=50`
+
+- Timestamp: `2026-06-03 23:52 MDT`
+- Corrected active jobs:
+  - `8527`: seed `7`, `gpu-l40s`, `l40s-01`, artifact root `/projects/p57098/euijin1/caver_stagee_k1_guarded_posttrain/k1guarded_seed7_budget50_20260603_projectartifacts_v2`
+  - `8528`: seed `13`, `gpu-l40s`, `l40s-01`, artifact root `/projects/p57098/euijin1/caver_stagee_k1_guarded_posttrain/k1guarded_seed13_budget50_20260603_projectartifacts_v2`
+  - `8529`: seed `29`, `gpu-l40s`, `l40s-01`, artifact root `/projects/p57098/euijin1/caver_stagee_k1_guarded_posttrain/k1guarded_seed29_budget50_20260603_projectartifacts_v2`
+- Requested walltime:
+  - `12:00:00`
+  - latest Slurm end time: `2026-06-04 11:51 MDT`
+  - rough expected finish: `2026-06-04 03:30-06:30 MDT`, based on prior one-GPU exact-offline posttrain/eval runs
+- Next check:
+  - verify exact rollout batch conversion succeeds under `/projects`
+  - verify DCP checkpoint/export writes stay under `/projects`
+  - after completion, read `posttrain_holdout_summary.json` for validation/test performance and refresh Stage-E figures/tables
+
+### Stage E+ result: `caver_k1_guarded + success_only`, `N=50`
+
+- Timestamp: `2026-06-04 10:27 MDT`
+- Slurm completion:
+  - `8527`: seed `7`, completed `0:0`, elapsed `04:23:29`
+  - `8528`: seed `13`, completed `0:0`, elapsed `04:34:57`
+  - `8529`: seed `29`, completed `0:0`, elapsed `04:34:08`
+- Exact-offline posttrain/eval result:
+  - online success: `0.387`
+  - held-out validation: `0.203 +/- 0.005`
+  - held-out test: `0.223 +/- 0.003`
+  - admitted contexts: `19.3 / 50`
+  - admitted demo items: `802.7`
+  - primitive steps: `3176.0`
+- Comparison at `N=50`:
+  - vanilla `K=1`: test `0.227 +/- 0.005`, primitive steps `15237.7`
+  - mainline CAVER: test `0.223 +/- 0.003`, primitive steps `1338.3`
+  - success-only admission: test `0.233 +/- 0.003`, primitive steps `3049.3`
+  - `K=1`-guarded + success-only: test `0.223 +/- 0.003`, primitive steps `3176.0`
+  - Top-M15 success admission: test `0.217 +/- 0.005`, primitive steps `2206.3`
+- Interpretation:
+  - `K=1`-guarded selection does not improve over mainline CAVER or vanilla `K=1` on held-out test.
+  - It uses more backend data than mainline CAVER and slightly more than success-only admission while underperforming success-only.
+  - The candidate-0 guard preserved the vanilla incumbent in the selector, but it did not solve the hard-family coverage problem.
+  - Admitted positives remain limited to block-to-tray and container-insertion; stack, drawer, and region families still have zero admitted successful contexts.
+- Refreshed artifacts:
+  - [figures/stagee_heldout_budget_curve_with_ablations.json](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_heldout_budget_curve_with_ablations.json)
+  - [figures/stagee_heldout_budget_curve_with_ablations.png](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_heldout_budget_curve_with_ablations.png)
+  - [figures/stagee_heldout_budget_curve_with_ablations.pdf](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_heldout_budget_curve_with_ablations.pdf)
+  - [logs/runtime/stagee_family_comparison_n50.json](/uhome/euijin1/projects/p57098/euijin1/Caver/logs/runtime/stagee_family_comparison_n50.json)
+  - [logs/runtime/stagee_family_comparison_n50.md](/uhome/euijin1/projects/p57098/euijin1/Caver/logs/runtime/stagee_family_comparison_n50.md)
+- Decision:
+  - do not promote `caver_k1_guarded + success_only` as the Stage-F main method
+  - retain success-only admission as the strongest Stage-E+ raw-success variant
+  - retain mainline CAVER as the strongest backend-data-compression variant
+  - if we continue improving before Stage F, the next method change should target hard-family exploration/admission, not candidate-0 guarding
+
+### Active Stage E+ hard-family rescue reprocess
+
+- Timestamp: `2026-06-04 11:37 MDT`
+- Motivation:
+  - vanilla `K=1` remains competitive because current CAVER variants starve hard families
+  - guarded selection did not fix zero admitted positives for stack/drawer/region
+  - new policy: `caver_hard_family_rescue`
+- Implemented policy:
+  - admit all successful non-error contexts
+  - identify proxy families with fewer than `family_min_success_count` successful admissions
+  - add up to `rescue_per_family_count` failed non-error near-miss contexts for those families, ranked by executed LCB/value
+  - current settings: `family_min_success_count=2`, `rescue_per_family_count=2`
+- Code wiring:
+  - [scripts/stagee/build_caver_round_artifacts.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/build_caver_round_artifacts.py)
+  - [scripts/stagee/run_stage0_caver_round.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_caver_round.sh)
+  - [scripts/slurm/submit_stage0_caver_round_reprocess.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_round_reprocess.sh)
+  - [scripts/slurm/submit_stage0_caver_lagged_budget.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_lagged_budget.sh)
+- Validation:
+  - syntax checks passed
+  - dry-run reprocess produced the expected finalizer command with `--admission-policy caver_hard_family_rescue`
+- Submitted CPU reprocess jobs:
+  - `8540`: seed `7`, `cpu`, started `2026-06-04 11:36:55 MDT`
+  - `8541`: seed `13`, `cpu`, started `2026-06-04 11:36:56 MDT`
+  - `8542`: seed `29`, `cpu`, started `2026-06-04 11:36:56 MDT`
+- Requested walltime:
+  - `00:45:00`
+  - latest Slurm end time: `2026-06-04 12:21 MDT`
+  - expected finish: within a few minutes because this reuses completed online traces and skips backend update
+- Next check:
+  - inspect `caver_admission_summary.json`
+  - verify stack/drawer/region now receive admitted near-miss contexts
+  - if data counts look reasonable, submit exact-offline posttrain/eval for the rescue variant
+
+### Stage E+ hard-family rescue status on 2026-06-04 12:27 MDT
+
+- Full CPU reprocess attempt:
+  - `8540`: seed `7`, timed out after `00:45:07`
+  - `8541`: seed `13`, timed out after `00:45:06`
+  - `8542`: seed `29`, timed out after `00:45:06`
+- Failure diagnosis:
+  - this was a CPU walltime issue while materializing full observation-bearing admitted traces
+  - memory was modest, about `2.0 GB` max RSS per job
+  - partial admitted traces reached about `800 MB` per seed before timeout
+  - no original source online runs were modified
+- Summary-only validation succeeded with `--skip-admitted-trace-write`:
+  - seed `7`: `26/50` admitted contexts, `1416` trace records
+  - seed `13`: `25/50` admitted contexts, `1387` trace records
+  - seed `29`: `25/50` admitted contexts, `1405` trace records
+- Verified admitted family coverage:
+  - seed `7`: block-to-tray `10`, container-insertion `10`, drawer `2`, region `2`, stack `2`
+  - seed `13`: block-to-tray `9`, container-insertion `10`, drawer `2`, region `2`, stack `2`
+  - seed `29`: block-to-tray `9`, container-insertion `10`, drawer `2`, region `2`, stack `2`
+- Interpretation:
+  - the hard-family rescue policy fixes the immediate zero-admission issue for stack/drawer/region
+  - the policy is worth a posttrain/eval test, but backend training needs the full admitted trace, so reprocess must be rerun with a longer CPU walltime
+- Next action:
+  - resubmit the same reprocess with `03:00:00` walltime on `cpu`
+  - if full admitted traces and summaries complete, submit exact-offline posttrain/eval on `gpu-l40s`
+
+### Active Stage E+ hard-family rescue full reprocess on 2026-06-04 12:28 MDT
+
+- Submitted longer CPU reprocess jobs:
+  - `8543`: seed `7`, `cpu`, walltime `03:00:00`
+  - `8544`: seed `13`, `cpu`, walltime `03:00:00`
+  - `8545`: seed `29`, `cpu`, walltime `03:00:00`
+- Run root:
+  - `/projects/p57098/euijin1/caver_stagee_hard_rescue_reprocess_runs`
+- Log root:
+  - `/projects/p57098/euijin1/caver_stagee_hard_rescue_reprocess_logs/slurm`
+- Storage placement:
+  - large admitted traces remain on `/projects`
+  - `/projects` currently has about `71T` free, so this is the right location for these multi-GB trace artifacts
+- Conservative latest finish:
+  - `2026-06-04 15:28 MDT`
+- Next check:
+  - verify `caver_admission_summary.json` exists for all three jobs
+  - verify `written_admitted_trace_records` matches the summary-only expected counts
+  - submit exact-offline posttrain/eval if all three reprocess jobs complete
+
+### Stage E+ hard-family rescue startup check on 2026-06-04 12:31 MDT
+
+- Startup status:
+  - `8543`, `8544`, and `8545` are all running on `cpu-01`
+  - admitted trace files are growing normally
+  - no pending/dependency issue or immediate Slurm startup failure observed
+- Early trace sizes after about three minutes:
+  - seed `7`: about `53 MB`
+  - seed `13`: about `53 MB`
+  - seed `29`: about `53 MB`
+- Builder robustness patch:
+  - [scripts/stagee/build_caver_round_artifacts.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/build_caver_round_artifacts.py) now writes selector/admission summaries before the slow full admitted-trace write, then updates the admission summary after the write completes
+  - this patch passed `python3 -m py_compile`
+  - the active jobs may have already loaded the earlier code path, so the patch mainly protects future reruns
+
+### Stage E+ hard-family rescue reprocess diagnosis on 2026-06-04 14:40 MDT
+
+- Completed Slurm status:
+  - `8543`: failed after `01:00:02`, exit `1:0`
+  - `8544`: failed after `00:58:04`, exit `1:0`
+  - `8545`: failed after `00:59:51`, exit `1:0`
+- Exact failure:
+  - seed `7`: summary expected `1416` admitted trace records, but full demo trace write found only `816`
+  - seed `13`: summary expected `1387`, found only `787`
+  - seed `29`: summary expected `1405`, found only `805`
+- Root cause:
+  - the source `K=1`-guarded runs were collected with `--demo-trace-write-policy success_only`
+  - hard-family rescue selects failed near-miss contexts, but those failed contexts do not have full observation-bearing demo traces in the old source artifacts
+  - therefore this rescue cannot be recovered by offline reprocessing alone
+- Code fix:
+  - [scripts/stagee/run_stage0_caver_round.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/stagee/run_stage0_caver_round.sh) now exposes `--demo-trace-write-policy`
+  - [scripts/slurm/submit_stage0_caver_lagged_budget.sh](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stage0_caver_lagged_budget.sh) now passes `--demo-trace-write-policy`, `--family-min-success-count`, and related admission tuning args through to the runner
+  - syntax checks passed:
+    - `bash -n scripts/stagee/run_stage0_caver_round.sh`
+    - `bash -n scripts/slurm/submit_stage0_caver_lagged_budget.sh`
+    - `python3 -m py_compile scripts/stagee/build_caver_round_artifacts.py scripts/stagee/run_stage0_caver_lagged_budget.py`
+- Decision:
+  - do not use the failed partial reprocess artifacts for training
+  - rerun online collection with full demo trace logging for all executed contexts
+
+### Active Stage E+ hard-family rescue full-trace online run on 2026-06-04 14:41 MDT
+
+- Submitted jobs:
+  - `8574`: seed `7`, `gpu-l40s`, running on `l40s-01`
+  - `8575`: seed `13`, `gpu-l40s`, running on `l40s-01`
+  - `8576`: seed `29`, `gpu-l40s`, running on `l40s-01`
+- Settings:
+  - `N=50`
+  - `K=4`
+  - `H=4`
+  - selector: `caver_k1_guarded`
+  - selector label: `k1_guarded_hard_family_rescue_v1`
+  - admission policy: `caver_hard_family_rescue`
+  - `family_min_success_count=2`
+  - `rescue_per_family_count=2`
+  - `demo_trace_write_policy=all`
+  - finalizer skips backend update; posttrain/eval will be submitted separately after artifacts are verified
+- Run root:
+  - `/projects/p57098/euijin1/caver_stagee_hard_rescue_fulltrace_runs`
+- Log root:
+  - `/projects/p57098/euijin1/caver_stagee_hard_rescue_fulltrace_logs/slurm`
+- Requested walltime:
+  - `18:00:00`
+  - conservative latest finish: `2026-06-05 08:40 MDT`
+- Startup verification:
+  - all jobs started immediately
+  - logs confirm `--demo-trace-write-policy all`, `--family-min-success-count 2`, and `--rescue-per-family-count 2` are present in the subround commands
+- Next action after completion:
+  - verify admitted trace write status is `complete`
+  - verify hard-family admitted contexts exist in the full demo trace
+  - submit exact-offline posttrain/eval on `gpu-l40s`
+
+### Stage E+ hard-family rescue full-trace completion on 2026-06-05 06:32 MDT
+
+- Full-trace online/finalizer jobs completed cleanly:
+  - `8574`: seed `7`, completed `0:0`, elapsed `15:42:40`
+  - `8575`: seed `13`, completed `0:0`, elapsed `15:35:50`
+  - `8576`: seed `29`, completed `0:0`, elapsed `15:46:49`
+- Verified final artifacts:
+  - all three runs produced `caver_round_summary.json`
+  - all three admission summaries report `admitted_trace_write_status=complete`
+  - all three have full admitted demo traces, so the previous missing-failed-trace issue is fixed
+- Admission / demo counts:
+  - seed `7`: `25/50` admitted contexts, `1391` demo items, `5536` primitive steps
+  - seed `13`: `25/50` admitted contexts, `1395` demo items, `5553` primitive steps
+  - seed `29`: `26/50` admitted contexts, `1457` demo items, `5803` primitive steps
+  - mean: `25.3` admitted contexts, `1414.3` demo items, `5630.7` primitive steps
+- Hard-family coverage:
+  - seed `7`: block-to-tray `9`, container-insertion `10`, drawer `2`, region `2`, stack `2`
+  - seed `13`: block-to-tray `9`, container-insertion `10`, drawer `2`, region `2`, stack `2`
+  - seed `29`: block-to-tray `10`, container-insertion `10`, drawer `2`, region `2`, stack `2`
+- Online success:
+  - seed `7`: `19/50 = 0.380`
+  - seed `13`: `19/50 = 0.380`
+  - seed `29`: `20/50 = 0.400`
+  - mean: `0.387`
+- Interpretation:
+  - the hard-family coverage bug is now fixed at the artifact level
+  - this variant uses more backend data than success-only admission, but still far less than vanilla `K=1`
+  - held-out posttrain/eval is required before deciding whether it solves the vanilla `K=1` raw-success challenge
+
+### Active Stage E+ hard-family rescue posttrain/eval on 2026-06-05 06:33 MDT
+
+- Submitted exact-offline posttrain/eval jobs:
+  - `8587`: seed `13`, `gpu-l40s`, running on `l40s-01`
+  - `8588`: seed `29`, `gpu-l40s`, running on `l40s-01`
+  - `8589`: seed `7`, `gpu-l40s`, running on `l40s-01`
+- Requested walltime:
+  - `12:00:00`
+  - conservative latest finish: `2026-06-05 18:33 MDT`
+- Artifact root:
+  - `/projects/p57098/euijin1/caver_stagee_hard_rescue_fulltrace_posttrain`
+- Storage status at submission:
+  - `/projects`: about `71T` free
+  - `/rdss`: about `1.9P` free
+  - `/tmp`: about `6.9T` free
+- Startup verification:
+  - all three jobs started immediately
+  - logs show trace-to-rollout conversion started
+  - stderr logs are empty at startup
+- Next action after completion:
+  - read `posttrain_holdout_summary.json` for all three seeds
+  - compare held-out validation/test against vanilla `K=1`, success-only, and mainline CAVER
+  - refresh Stage-E figures/tables if this variant is competitive
+
+### Stage E+ result: hard-family rescue full-trace CAVER, `N=50`
+
+- Posttrain/eval jobs completed cleanly on `gpu-l40s`:
+  - `8587`: seed `13`, completed `0:0`, elapsed `05:29:24`, max RSS `54267792K`
+  - `8588`: seed `29`, completed `0:0`, elapsed `05:29:02`, max RSS `53510564K`
+  - `8589`: seed `7`, completed `0:0`, elapsed `05:32:45`, max RSS `52278932K`
+- Per-seed held-out results:
+  - seed `7`: validation `0.210`, test `0.250`
+  - seed `13`: validation `0.220`, test `0.220`
+  - seed `29`: validation `0.230`, test `0.240`
+- Aggregate result at `N=50`:
+  - online success: `0.387 +/- 0.005`
+  - held-out validation: `0.220 +/- 0.005`
+  - held-out test: `0.237 +/- 0.007`
+  - admitted contexts: `25.3 / 50`
+  - admitted demo items: `1414.3`
+  - primitive steps: `5630.7`
+- Comparison against the current Stage-E baselines at `N=50`:
+  - vanilla real-only `K=1`: test `0.227 +/- 0.005`, primitive steps `15237.7`
+  - success-only admission: test `0.233 +/- 0.003`, primitive steps `3049.3`
+  - mainline CAVER: test `0.223 +/- 0.003`, primitive steps `1338.3`
+  - hard-family rescue is the best raw held-out test mean so far and still uses about `2.7x` fewer backend primitive steps than vanilla `K=1`
+- Family diagnosis:
+  - hard-family rescue admits hard-family near-miss contexts that success-only missed: drawer `6`, region `6`, stack `6` admitted contexts across the three seeds
+  - held-out test by family: block-to-tray `0.433`, container-insertion `0.700`, drawer `0.000`, region `0.000`, stack `0.050`
+  - the improvement is mostly from block-to-tray and a small stack gain; drawer/region remain unsolved
+- Refreshed artifacts:
+  - `figures/stagee_heldout_budget_curve_with_ablations.json`
+  - `figures/stagee_heldout_budget_curve_with_ablations.png`
+  - `figures/stagee_heldout_budget_curve_with_ablations.pdf`
+  - `logs/runtime/stagee_family_comparison_n50.json`
+  - `logs/runtime/stagee_family_comparison_n50.md`
+- Current interpretation:
+  - the vanilla `K=1` challenge is no longer a hard blocker, because hard-family rescue beats the `K=1` mean while preserving a substantial backend-data-efficiency margin
+  - this is not a decisive dominance claim because the margin is small and the error bars overlap
+  - mainline CAVER remains the cleanest proposal-mainline data-compression result; hard-family rescue is the leading pre-Stage-F pilot variant if we accept admitting a small number of failed hard-family near misses
+  - before full PiPER, the next paper/method decision is whether to present hard-family rescue as a Stage-E+ variant/diagnostic extension or fold it into the mainline admission rule
+
+### Active Stage E+ hard-family rescue quota-3 pass on 2026-06-05 12:45 MDT
+
+- Goal:
+  - widen the small hard-rescue margin over vanilla `K=1` without changing the selector or spending new online LIBERO execution budget
+  - keep the pass admission-only and proposal-auditable
+- Summary-only quota sweep from existing full-trace `N=50` artifacts:
+  - output: `/projects/p57098/euijin1/caver_stagee_hard_rescue_quota_sweep_summary/hard_rescue_quota_sweep_summary.json`
+  - quota `1`: mean admitted contexts `22.3`, mean demo items `1114.3`, hard-family totals drawer/region/stack `3/3/3`
+  - quota `2`: mean admitted contexts `25.3`, mean demo items `1414.3`, hard-family totals drawer/region/stack `6/6/6`
+  - quota `3`: mean admitted contexts `28.3`, mean demo items `1714.3`, hard-family totals drawer/region/stack `9/9/9`
+  - quota `4`: mean admitted contexts `31.3`, mean demo items `2014.3`, hard-family totals drawer/region/stack `12/12/12`
+- Selected next candidate:
+  - `caver_hard_family_rescue`, `family_min_success_count=3`, `rescue_per_family_count=3`
+  - rationale: adds one more near-miss per hard family per seed compared with the previous quota-2 result while remaining far below vanilla `K=1` backend data
+  - quota `4` is held back because it is more likely to over-train on failed near-miss traces
+- Submitted CPU reprocess jobs:
+  - `8629`: seed `13`, dependency parent for `8632`
+  - `8630`: seed `29`, dependency parent for `8633`
+  - `8631`: seed `7`, dependency parent for `8634`
+  - partition: `cpu`
+  - walltime: `03:00:00`
+  - run root: `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_reprocess_runs`
+  - log root: `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_reprocess_logs/slurm`
+- Submitted dependent exact posttrain/eval jobs:
+  - `8632`: seed `13`, dependency `afterok:8629`
+  - `8633`: seed `29`, dependency `afterok:8630`
+  - `8634`: seed `7`, dependency `afterok:8631`
+  - partition: `gpu-l40s`
+  - walltime: `12:00:00`
+  - artifact root: `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_posttrain`
+- Conservative finish estimate:
+  - if reprocess uses its full walltime and posttrain/eval uses its full walltime after dependency release, latest expected finish is about `2026-06-06 03:45 MDT`
+  - expected finish is likely earlier if reprocess trace writing completes quickly
+- Queue state at submission:
+  - `8629`, `8630`, `8631` were running on `cpu-01`
+  - `8632`, `8633`, `8634` were pending with reason `(Dependency)`
+- Startup verification:
+  - all three reprocess jobs reached the lagged finalizer with `--family-min-success-count 3` and `--rescue-per-family-count 3`
+  - admission summaries were written with expected counts:
+    - seed `13`: `28` admitted contexts, `1695` expected demo records, hard-family counts `3/3/3`
+    - seed `29`: `29` admitted contexts, `1757` expected demo records, hard-family counts `3/3/3`
+    - seed `7`: `28` admitted contexts, `1691` expected demo records, hard-family counts `3/3/3`
+  - admitted trace files are being written and are expected to grow toward the previous quota-2 scale of roughly `1.6-1.7G`
+  - dependent GPU jobs remain correctly pending on `afterok` dependencies
+- Next action after completion:
+  - verify `caver_admission_summary.json` for all quota-3 reprocess results
+  - aggregate `posttrain_holdout_summary.json` from `8632-8634`
+  - compare quota-3 against quota-2 hard rescue, success-only, and vanilla `K=1`
+
+### Recovery: hard-family rescue quota-3 pass on 2026-06-05 15:26 MDT
+
+- The first quota-3 chain did not remain valid:
+  - CPU reprocess jobs `8629`, `8630`, and `8631` were canceled after admission summaries had been written because the lagged finalizer entered an unnecessary admitted-demo conversion step and risked timing out.
+  - dependent GPU jobs `8632`, `8633`, and `8634` were canceled before starting.
+- A first recovery submission also failed immediately:
+  - CPU jobs `8639`, `8641`, and `8643` failed in about one second because the copied source command still contained stale `--finalizer-skip-backend-update` while the new command also added `--finalizer-skip-backend-train`.
+  - dependent GPU jobs `8640`, `8642`, and `8644` were canceled so they would not remain pending with `DependencyNeverSatisfied`.
+- Code fix applied:
+  - `scripts/stagee/run_stage0_caver_lagged_budget.py` now supports `--finalizer-skip-backend-train`, which passes `--skip-backend-train` to the final artifact pass.
+  - `scripts/slurm/submit_stage0_caver_round_reprocess.sh` now strips stale lagged finalizer skip flags before adding the requested finalizer mode.
+  - validation passed: `python3 -m py_compile scripts/stagee/run_stage0_caver_lagged_budget.py` and `bash -n scripts/slurm/submit_stage0_caver_round_reprocess.sh`.
+- Clean recovery jobs submitted:
+  - CPU reprocess `8645`: seed `13`, dependency parent for `8646`.
+  - CPU reprocess `8647`: seed `29`, dependency parent for `8648`.
+  - CPU reprocess `8649`: seed `7`, dependency parent for `8650`.
+  - GPU posttrain/eval `8646`: seed `13`, dependency `afterok:8645`.
+  - GPU posttrain/eval `8648`: seed `29`, dependency `afterok:8647`.
+  - GPU posttrain/eval `8650`: seed `7`, dependency `afterok:8649`.
+- Clean recovery roots:
+  - reprocess run root: `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_reprocess_runs_v3`.
+  - reprocess log root: `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_reprocess_logs_v3/slurm`.
+  - posttrain artifact root: `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_posttrain_v3`.
+- Startup verification:
+  - `8645`, `8647`, and `8649` are running on `cpu-01`.
+  - `8646`, `8648`, and `8650` are pending on normal `afterok` dependencies.
+  - generated job scripts contain `--finalizer-skip-backend-train` and no stale `--finalizer-skip-backend-update`.
+  - finalizer commands end in `--skip-online --skip-backend-train`.
+  - admission summaries already show the intended quota-3 counts:
+    - seed `13`: `28` admitted contexts, `1695` admitted trace records, hard-family counts `3/3/3`.
+    - seed `29`: `29` admitted contexts, `1757` admitted trace records, hard-family counts `3/3/3`.
+    - seed `7`: `28` admitted contexts, `1691` admitted trace records, hard-family counts `3/3/3`.
+- Conservative finish estimate:
+  - CPU walltime is `05:00:00`; GPU walltime is `12:00:00`.
+  - latest expected finish if each dependent chain uses full walltime: about `2026-06-06 08:30 MDT`.
+  - expected finish is likely earlier if admitted-trace writing finishes near the previous observed `2.5` hour scale.
+
+### Progress update: quota-3 posttrain resubmission on 2026-06-05 19:41 MDT
+
+- CPU reprocess stage completed cleanly:
+  - `8645`: seed `13`, completed in `02:19:10`.
+  - `8647`: seed `29`, completed in `02:24:02`.
+  - `8649`: seed `7`, completed in `02:19:03`.
+- Reprocess artifacts are complete:
+  - seed `13`: `28` admitted contexts, `1695` admitted trace records, admitted trace `1.857 GiB`.
+  - seed `29`: `29` admitted contexts, `1757` admitted trace records, admitted trace `1.918 GiB`.
+  - seed `7`: `28` admitted contexts, `1691` admitted trace records, admitted trace `1.825 GiB`.
+  - all three have `caver_round_summary.json` and `caver_round_demo.summary.json`.
+- The first GPU posttrain jobs from the clean chain were canceled:
+  - `8646`, `8648`, and `8650` were running, but all three wrote to the same artifact root `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_posttrain_v3`.
+  - this created shared `posttrain_exact_rollout_batch.pt`, `posttrain_train`, and checkpoint paths, so those jobs were canceled to avoid invalid/colliding results.
+- Corrected GPU posttrain/eval jobs submitted with seed-specific artifact roots:
+  - `8653`: seed `13`, artifact root `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_posttrain_v4/seed13`.
+  - `8654`: seed `29`, artifact root `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_posttrain_v4/seed29`.
+  - `8655`: seed `7`, artifact root `/projects/p57098/euijin1/caver_stagee_hard_rescue_q3_posttrain_v4/seed7`.
+- Queue state at submission:
+  - `8653`, `8654`, and `8655` started immediately on `l40s-01`.
+  - each job has `12:00:00` walltime.
+- ETA:
+  - expected finish based on prior Stage-E posttrain/eval runtime is around `2026-06-06 01:30-02:30 MDT`.
+  - conservative walltime latest finish is about `2026-06-06 07:40 MDT`.
+- Next check:
+  - verify each seed produces its own `posttrain_holdout_summary.json`.
+  - aggregate quota-3 against quota-2 hard rescue, success-only, and vanilla `K=1`.
+
+### Result: hard-family rescue quota-3 on 2026-06-06 01:54 MDT
+
+- Corrected GPU posttrain/eval jobs completed cleanly:
+  - `8653`: seed `13`, completed `0:0`, elapsed `05:52:40`, max RSS `55166300K`.
+  - `8654`: seed `29`, completed `0:0`, elapsed `05:48:36`, max RSS `58508200K`.
+  - `8655`: seed `7`, completed `0:0`, elapsed `05:55:26`, max RSS `42731652K`.
+- Per-seed held-out results:
+  - seed `7`: validation `0.220`, test `0.210`.
+  - seed `13`: validation `0.190`, test `0.230`.
+  - seed `29`: validation `0.200`, test `0.230`.
+- Aggregate quota-3 result at `N=50`:
+  - held-out validation: `0.203 +/- 0.009`.
+  - held-out test: `0.223 +/- 0.007`.
+  - admitted contexts: `28.3 / 50`.
+  - admitted demo items: `1714.3`.
+  - primitive steps: `6830.7`.
+- Family-level held-out test:
+  - block-to-tray: `24/60 = 0.400`.
+  - container-insertion: `42/60 = 0.700`.
+  - drawer-open: `0/60 = 0.000`.
+  - relocate-to-region: `0/60 = 0.000`.
+  - two-object-stack: `1/60 = 0.017`.
+- Comparison:
+  - quota-2 hard rescue: test `0.237 +/- 0.007`, primitive steps `5630.7`.
+  - quota-3 hard rescue: test `0.223 +/- 0.007`, primitive steps `6830.7`.
+  - vanilla real-only `K=1`: test `0.227 +/- 0.005`, primitive steps `15237.7`.
+- Interpretation:
+  - quota-3 is a negative method pass.
+  - adding one more failed hard-family near-miss per hard family per seed increased backend data but reduced held-out test performance.
+  - quota-2 remains the current best Stage-E+ hard-family rescue variant.
+  - do not use quota-3 as the Stage-F pilot variant or paper headline result.
+- Queue state:
+  - no Stage-E experiment jobs remain in the queue after completion; only the interactive CPU session is running.
+
+### Stage E++ plan: failure-diagnostic admission pass before Stage F
+
+- Date recorded: `2026-06-06 02:33 MDT`.
+- Motivation:
+  - strict mainline CAVER remains a backend-data-efficiency result, not a raw-success-dominance result.
+  - vanilla real-only `K=1` is competitive at `N=50`: held-out test `0.227 +/- 0.005`.
+  - quota-2 hard-family rescue is the current best Stage-E+ raw held-out variant: held-out test `0.237 +/- 0.007`, primitive steps `5630.7`.
+  - quota-3 hard-family rescue is negative: held-out test dropped to `0.223 +/- 0.007` while primitive steps increased to `6830.7`.
+- Diagnosis:
+  - failed hard-family near-misses may be useful as evidence that the selector/calibrator is miscalibrated on stack/drawer/region families.
+  - they should not be freely converted into positive backend imitation targets.
+  - the next pass must separate two roles:
+    - backend imitation data: verified successes only.
+    - failure evidence: retained in selector/admission diagnostics and DR/calibration artifacts, but not admitted into the StepNFT-style demo trace.
+- Implementation plan:
+  - add a new admission policy `caver_failure_diagnostic_success`.
+  - this policy admits all successful, trace-bearing, non-error, non-safety-aborted contexts for backend training.
+  - for hard-family failed near-misses, it records `failure_diagnostic_for_calibration=true` and a diagnostic reason, but keeps `admit_for_training=false`.
+  - the policy is intentionally not the strict proposal-mainline rule; it is a Stage-E++ diagnostic/pilot candidate designed to test whether hard-family coverage can be improved without imitating failures.
+- First runnable experiment:
+  - reuse the already collected full-trace hard-family rescue online runs.
+  - reprocess the existing traces with `caver_failure_diagnostic_success`.
+  - run exact offline post-training/evaluation from the new admitted success-only trace for seeds `7`, `13`, and `29`.
+  - this is an offline reprocess/posttrain pass, not new LIBERO online collection.
+- Success criteria:
+  - primary: held-out test should be at least competitive with vanilla `K=1` (`>= 0.227`) and preferably close to quota-2 rescue (`>= 0.237`) without admitting failed traces as positive imitation data.
+  - secondary: primitive steps should remain far below vanilla `K=1` (`15238`), preferably below `4000-6000`.
+  - diagnostic: hard-family failure counts should be visible in the admission summary even though they are rejected for backend training.
+- Decision rule after this pass:
+  - if it beats or matches vanilla `K=1` while avoiding failure imitation, use it as the preferred Stage-F pilot variant alongside strict mainline and real-only.
+  - if it falls back to success-only/mainline performance, keep quota-2 as a diagnostic result only and proceed to Stage-F readiness with the narrower admitted-update-data-efficiency claim.
+  - do not continue quota sweeping unless a new mechanism changes selector behavior or calibration, because quota-3 already showed that simply adding more near-miss failures is harmful.
+
+### Submission: failure-diagnostic success-only reprocess/posttrain on 2026-06-06 02:42 MDT
+
+- Code and smoke status:
+  - implemented `caver_failure_diagnostic_success` in `scripts/stagee/build_caver_round_artifacts.py`.
+  - syntax checks passed with `python3 -m py_compile scripts/stagee/build_caver_round_artifacts.py` and `bash -n` on the relevant Slurm launchers.
+  - local smoke test on seed `7` admitted `19` successful contexts and recorded `6` hard-family failures as diagnostics only:
+    - drawer-open: `2`
+    - relocate-to-region: `2`
+    - two-object-stack: `2`
+  - smoke admitted trace records: `791`.
+- Submitted CPU reprocess jobs:
+  - `8657`: seed `7`, source full-trace hard-rescue run, `cpu`, walltime `05:00:00`.
+  - `8659`: seed `13`, source full-trace hard-rescue run, `cpu`, walltime `05:00:00`.
+  - `8661`: seed `29`, source full-trace hard-rescue run, `cpu`, walltime `05:00:00`.
+- Submitted dependent GPU posttrain/eval jobs:
+  - `8658`: seed `7`, dependency `afterok:8657`, `gpu-l40s`, walltime `12:00:00`, artifact root `/projects/p57098/euijin1/caver_stagee_failure_diag_success_posttrain_v1/seed7`.
+  - `8660`: seed `13`, dependency `afterok:8659`, `gpu-l40s`, walltime `12:00:00`, artifact root `/projects/p57098/euijin1/caver_stagee_failure_diag_success_posttrain_v1/seed13`.
+  - `8662`: seed `29`, dependency `afterok:8661`, `gpu-l40s`, walltime `12:00:00`, artifact root `/projects/p57098/euijin1/caver_stagee_failure_diag_success_posttrain_v1/seed29`.
+- Shared roots:
+  - reprocess root: `/projects/p57098/euijin1/caver_stagee_failure_diag_success_reprocess_runs_v1`.
+  - reprocess logs: `/projects/p57098/euijin1/caver_stagee_failure_diag_success_reprocess_logs_v1/slurm`.
+  - posttrain root: `/projects/p57098/euijin1/caver_stagee_failure_diag_success_posttrain_v1`.
+- Startup check:
+  - `8657`, `8659`, and `8661` were running on `cpu-01`.
+  - `8658`, `8660`, and `8662` were pending only on normal `afterok` dependencies.
+  - no stale `DependencyNeverSatisfied` jobs were created.
+- ETA:
+  - expected finish if reprocess follows previous trace-writing runtimes plus posttrain/eval follows previous GPU runtimes: roughly `2026-06-06 10:30-12:30 MDT`.
+  - conservative latest finish using full walltimes: about `2026-06-06 19:45 MDT`.
+- Next check:
+  - after CPU jobs finish, verify admission summaries contain `failure_diagnostic_context_ids` but no failed contexts in `admitted_family_counts`.
+  - after GPU jobs finish, aggregate `posttrain_holdout_summary.json` and compare against vanilla `K=1`, success-only, quota-2 rescue, and quota-3 rescue.
+
+### Startup verification: failure-diagnostic success-only on 2026-06-06 02:44 MDT
+
+- Queue:
+  - CPU jobs `8657`, `8659`, and `8661` are running on `cpu-01`.
+  - GPU jobs `8658`, `8660`, and `8662` are pending only on `afterok` dependencies.
+- Admission summaries have been written before trace materialization:
+  - seed `7`: `19` admitted successes, `791` admitted trace records, diagnostic failures `2/2/2` for drawer/region/stack.
+  - seed `13`: `19` admitted successes, `795` admitted trace records, diagnostic failures `2/2/2` for drawer/region/stack.
+  - seed `29`: `20` admitted successes, `857` admitted trace records, diagnostic failures `2/2/2` for drawer/region/stack.
+- Admitted families:
+  - admitted backend data remains only from block-to-tray and container-insertion successes.
+  - hard-family failed near misses are present in `failure_diagnostic_family_counts`, not `admitted_family_counts`.
+- Current trace-write status:
+  - admission summaries show `admitted_trace_write_status=pending`; CPU jobs are still writing the admitted trace subset.
+
+### Progress check: failure-diagnostic success-only on 2026-06-06 08:25 MDT
+
+- Slurm status:
+  - CPU reprocess jobs `8657`, `8659`, and `8661` completed successfully with exit code `0:0`.
+  - dependent GPU posttrain/eval jobs `8658`, `8660`, and `8662` are running on `gpu-l40s` node `l40s-01`.
+  - no `DependencyNeverSatisfied` jobs are present for this chain.
+- Completed artifacts:
+  - all three seeds produced `posttrain_exact_rollout_batch.pt`.
+  - all three seeds produced exported posttrain checkpoints under `/projects/p57098/euijin1/caver_stagee_failure_diag_success_posttrain_v1/seed*/posttrain_checkpoint`.
+  - all three seeds completed held-out validation evaluation on `T_val_S0`.
+- Interim validation success:
+  - seed `7`: `21/100 = 0.21`.
+  - seed `13`: `20/100 = 0.20`.
+  - seed `29`: `20/100 = 0.20`.
+  - mean validation success so far: about `0.203`.
+- Active test evaluation progress from RDSS Slurm logs:
+  - seed `7`: currently around context `60/100` on `T_test_S0`.
+  - seed `13`: currently around context `83/100` on `T_test_S0`.
+  - seed `29`: currently around context `65/100` on `T_test_S0`.
+- Updated ETA:
+  - expected completion for the slowest seed is roughly `2026-06-06 09:10 MDT` if the current per-context evaluation rate holds.
+  - walltime limit remains safe: GPU jobs have run about `4.2` hours of a `12` hour allocation.
+- Current interpretation:
+  - validation performance is not yet stronger than the existing quota-2 hard-family rescue result.
+  - final decision should wait for `T_test_S0` JSONs and aggregation, because the held-out test split is the paper-facing metric.
+
+### Result: failure-diagnostic success-only on 2026-06-06 09:15 MDT
+
+- Slurm completion:
+  - CPU reprocess jobs `8657`, `8659`, and `8661`: `COMPLETED`, exit code `0:0`.
+  - GPU posttrain/eval jobs `8658`, `8660`, and `8662`: `COMPLETED`, exit code `0:0`.
+  - current queue contains only the interactive CPU session; no Stage-E++ jobs remain pending/running.
+- Held-out validation:
+  - seed `7`: `0.21`.
+  - seed `13`: `0.20`.
+  - seed `29`: `0.20`.
+  - mean `0.203`, population SD about `0.005`.
+- Held-out test:
+  - seed `7`: `0.23`.
+  - seed `13`: `0.23`.
+  - seed `29`: `0.23`.
+  - mean `0.230`, population SD `0.000`.
+- Backend data:
+  - admitted contexts: `19`, `19`, `20`; mean `19.3`.
+  - demo items: `791`, `795`, `857`; mean `814.3`.
+  - primitive steps: `3136`, `3153`, `3403`; mean `3230.7`.
+- Admission diagnosis:
+  - admitted backend families remain block-to-tray and container-insertion only.
+  - hard-family failures are recorded as diagnostics only: drawer/region/stack `2/2/2` for each seed.
+  - no failed hard-family traces were admitted as positive imitation data in this pass.
+- Interpretation:
+  - failure-diagnostic success-only is cleaner than quota-2 rescue because it does not imitate failures.
+  - it is more backend-data-efficient than quota-2 rescue: about `3231` primitive steps versus `5631`.
+  - it is not the best raw-success result: held-out test `0.230` is below quota-2 rescue `0.237`.
+  - it is slightly above vanilla `K=1` held-out test `0.227`, but the margin is too small to claim dominance.
+- Decision:
+  - keep strict mainline CAVER as the proposal-mainline admitted-update-data-efficiency result.
+  - keep quota-2 hard-family rescue as the best raw Stage-E+ diagnostic variant, but describe it as fragile because quota-3 regressed.
+  - keep failure-diagnostic success-only as the safer pre-PiPER pilot candidate if we want to avoid admitting failed traces on hardware.
+
+### Planned pass: CAVER-FASR segment repair on 2026-06-06
+
+- Motivation:
+  - strict CAVER is too conservative on hard families.
+  - quota-2 hard-family rescue improves raw held-out test but imitates full failed near-miss traces.
+  - quota-3 rescue regresses, which suggests unrestricted failed-trace imitation is noisy.
+- Method pass:
+  - `caver_family_segment_repair`.
+  - preserve all verified successful contexts for backend imitation.
+  - for hard families below the success quota, select up to two failed non-error near-miss contexts per family.
+  - admit only a bounded prefix of each repaired failed context, selected by logged calibrated/provider chunk metrics.
+  - keep all original success/failure labels intact; never relabel a full failed trajectory as positive.
+- Current implementation state:
+  - patched `build_caver_round_artifacts.py` with segment-repair admission metadata and partial admitted-trace writing.
+  - patched `run_stage0_caver_round.sh`, `submit_stage0_caver_round_reprocess.sh`, and `submit_stage0_caver_lagged_budget.sh` to pass repair prefix bounds.
+  - syntax checks passed for the patched Python and shell files.
+- First run plan:
+  - reuse the existing full-trace hard-rescue online runs under `/projects/p57098/euijin1/caver_stagee_hard_rescue_fulltrace_runs`.
+  - run CPU reprocess with:
+    - `admission_policy=caver_family_segment_repair`.
+    - `family_min_success_count=2`.
+    - hard families: `drawer_open_proxy,relocate_to_region_proxy,two_object_stack_proxy`.
+    - `rescue_per_family_count=2`.
+    - initial prefix cap: `repair_max_trace_records=12`.
+  - then run exact-offline posttrain/eval for seeds `{7,13,29}`.
+- Success gate:
+  - strong result: held-out test at least `0.240`, validation stable, primitive steps below `4500`, and zero full failed contexts admitted.
+  - acceptable result: match or beat quota-2 rescue while using fewer primitive steps and zero full failed contexts admitted.
+  - negative result: if it stays near failure-diagnostic success-only or below vanilla `K=1`, stop method chasing and carry the narrower data-efficiency claim into Stage F readiness only.
+
+### Active jobs: CAVER-FASR segment repair on 2026-06-06 13:45 MDT
+
+- Smoke validation:
+  - seed `7` summary-only reprocess admitted `19` successes plus `6` repaired hard-family prefixes.
+  - expected admitted trace records: `863`.
+  - repaired trace records: `72`.
+  - `full_failed_contexts_admitted=0`.
+- Submitted jobs:
+  - seed `7`: CPU reprocess `8669` -> GPU posttrain/eval `8670`.
+  - seed `13`: CPU reprocess `8671` -> GPU posttrain/eval `8672`.
+  - seed `29`: CPU reprocess `8673` -> GPU posttrain/eval `8674`.
+- Current scheduler state at submission check:
+  - `8669`, `8671`, and `8673` are running on `cpu`.
+  - `8670`, `8672`, and `8674` are pending only on normal `afterok` dependencies.
+- Startup artifact check:
+  - seed `7`: `25` admitted contexts, `863` admitted trace records, `72` repair records, `full_failed_contexts_admitted=0`.
+  - seed `13`: `25` admitted contexts, `867` admitted trace records, `72` repair records, `full_failed_contexts_admitted=0`.
+  - seed `29`: `26` admitted contexts, `929` admitted trace records, `72` repair records, `full_failed_contexts_admitted=0`.
+  - all three admission summaries currently show trace writing as `pending`, which is expected while the CPU reprocess jobs stream the large full-trace sources.
+- Artifact roots:
+  - reprocess: `/projects/p57098/euijin1/caver_stagee_fasr_reprocess_runs_v1`.
+  - reprocess logs: `/projects/p57098/euijin1/caver_stagee_fasr_reprocess_logs_v1/slurm`.
+  - posttrain/eval: `/projects/p57098/euijin1/caver_stagee_fasr_posttrain_v1`.
+  - submission record: `logs/runtime/stagee_fasr_segment_repair_20260606T134324-0600.md`.
+- ETA:
+  - expected CPU reprocess finish: `2026-06-06 14:45-16:45 MDT`.
+  - expected GPU posttrain/eval finish: roughly `4-6` hours after each dependency starts.
+  - conservative latest finish using walltimes: about `2026-06-07 04:45 MDT`.
+
+### Correction: strict verified-progress CAVER-FASR on 2026-06-06 14:33 MDT
+
+- Status correction:
+  - the earlier `caver_family_segment_repair` implementation was a metric-prefix diagnostic, not the strict verified-progress repair requested by the external review.
+  - canceled off-spec jobs `8669`, `8670`, `8671`, `8672`, `8673`, and `8674` before the dependent GPU jobs started.
+- Strict implementation now in code:
+  - `scripts/bridge/libero_remote_eval.py` can log compact LIBERO semantic state and per-step Stage-0 progress via `--trace-stage0-progress`.
+  - `scripts/stagee/caver_heuristic.py` now defines `compute_progress_series`, `find_best_progress_segment`, and `segment_repair_eligible`.
+  - Stage-0 progress uses proposal-aligned family formulas:
+    - object-to-target distance decrease for tray/basket/caddy-region tasks.
+    - stack height plus horizontal alignment progress for two-object stack.
+    - drawer joint opening for drawer tasks.
+  - `scripts/stagee/build_caver_round_artifacts.py` now admits failed repairs only when verified progress gain exceeds `--repair-min-progress`; the old metric-prefix helper was removed.
+  - repaired records now carry `repair_start_step`, `repair_end_step`, `repair_progress_gain`, `repair_family_id`, `repair_progress_source`, and `full_failed_trace_admitted=false`.
+  - `scripts/stagee/build_stagee_dr_dataset.py` now emits `used_for_policy_imitation`, `used_for_calibration`, and `used_for_segment_repair` flags.
+- Smoke checks passed:
+  - LIBERO progress extraction returns valid progress for all five proxy families.
+  - synthetic failed drawer trace repairs only when verified progress gain is present.
+  - Python compile and shell syntax checks pass.
+- Next aligned experiment:
+  - rerun CAVER-FASR `N=50` online collection because old full traces did not store semantic progress.
+  - use `--admission-policy caver_family_segment_repair`.
+  - use `--trace-stage0-progress`.
+  - keep `family_min_success_count=2`, `rescue_per_family_count=2`, and hard families `drawer_open_proxy,relocate_to_region_proxy,two_object_stack_proxy`.
+  - initial thresholds: `repair_min_progress=0.03`, `repair_min_primitive_steps=4`, `repair_max_regression=0.10`, `repair_max_trace_records=12`.
+- Decision gate remains:
+  - strong: held-out test at least `0.240`, validation at least `0.220`, primitive steps below `4500`, zero full failed trajectories admitted, and at least two repaired segments per hard family.
+  - if this does not beat or clearly contextualize vanilla `K=1`, stop method chasing and keep Stage F as a gated pilot rather than full real-robot study.
+
+### Active corrected jobs: verified-progress CAVER-FASR on 2026-06-06 14:37 MDT
+
+- Submitted corrected online/finalizer jobs:
+  - seed `7`: job `8675`, running on `gpu-l40s`, run dir `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n50__seed7__budget50__20260606T203639Z`.
+  - seed `13`: job `8676`, running on `gpu-l40s`, run dir `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n50__seed13__budget50__20260606T203640Z`.
+  - seed `29`: job `8677`, running on `gpu-l40s`, run dir `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n50__seed29__budget50__20260606T203640Z`.
+- Submission record:
+  - `logs/runtime/stagee_fasr_verified_progress_20260606T143639-0600.md`.
+- Scope:
+  - these jobs rerun online collection with `--trace-stage0-progress` and run the final admitted-demo artifact pass with backend update skipped.
+  - posttrain/eval jobs should be submitted after these finish and the admitted exact rollout artifacts exist.
+- ETA:
+  - expected online/finalizer finish: `2026-06-07 02:30-10:30 MDT` if performance is similar to prior GE-Sim full-trace runs.
+  - conservative walltime limit: `2026-06-13 14:37 MDT`.
+
+### Progress check: verified-progress CAVER-FASR on 2026-06-06 17:32 MDT
+
+- Scheduler state:
+  - `8675`, `8676`, and `8677` are still `RUNNING` on `gpu-l40s` node `l40s-01`.
+  - Slurm accounting shows `RUNNING`, `ExitCode=0:0`, elapsed about `02:56`.
+  - no traceback, exception, or Slurm failure is visible in the current logs.
+- Confirmed corrected method flags in the active jobs:
+  - `--trace-stage0-progress`.
+  - `--admission-policy caver_family_segment_repair`.
+  - `--selector-mode k1_guarded_verified_progress_fasr_v1`.
+  - `--repair-min-progress 0.03`.
+  - `--repair-min-primitive-steps 4`.
+  - `--repair-max-regression 0.10`.
+  - `--exact-rollout-payload`, `H=4`, `K=4`, GE-Sim provider summaries, lagged DR calibrator path.
+- Online collection progress:
+  - all three seeds are in round `1/2`, context `22/25`.
+  - seed `7`: contexts `1-20` succeeded; context `21` two-object stack failed at `400` policy steps; context `22` is running.
+  - seed `13`: contexts `1-20` succeeded; context `21` two-object stack failed at `400` policy steps; context `22` is running.
+  - seed `29`: context `7` block-to-tray failed at `400` policy steps; contexts `1-6` and `8-20` succeeded; context `21` two-object stack failed at `400` policy steps; context `22` is running.
+- Artifact state:
+  - round summaries and admission summaries are not expected yet because round `1` online collection has not completed.
+  - after round `1` completes, the strict verified-progress repair/finalizer pass should create the admitted exact rollout artifacts.
+- Updated ETA:
+  - round `1` likely finishes in roughly `1-2` hours if the remaining hard contexts continue at max horizon.
+  - full two-round collection/finalizer likely finishes overnight, roughly `2026-06-07 02:00-08:00 MDT`; keep the wider previous ETA `02:30-10:30 MDT` as the conservative operational window.
+  - next action after completion: submit exact-offline posttrain/eval for seeds `{7,13,29}` from the corrected run directories.
+
+### Progress check: verified-progress CAVER-FASR on 2026-06-07 00:24 MDT
+
+- Scheduler state:
+  - `8675`, `8676`, and `8677` are still `RUNNING` on `gpu-l40s` node `l40s-01`.
+  - Slurm accounting remains clean: `RUNNING`, `ExitCode=0:0`, elapsed about `09:48`.
+  - no traceback, exception, OOM, or Slurm failure signature is visible in the current logs.
+- Collection progress:
+  - round `1/2` completed for all seeds.
+  - round `2/2` is active for all seeds.
+  - seed `7`: round 2 completed `16/25`; currently started context `17/25` in `drawer_open_proxy`.
+  - seed `13`: round 2 completed `17/25`; currently started context `18/25` in `drawer_open_proxy`.
+  - seed `29`: round 2 completed `16/25`; currently started context `17/25` in `drawer_open_proxy`.
+- Round 1 result/artifact snapshot:
+  - seed `7`: online `20/25` successes (`0.800`), `20` admitted contexts, `813` admitted trace records, `0` repaired contexts, `0` full failed contexts admitted.
+  - seed `13`: online `20/25` successes (`0.800`), `20` admitted contexts, `795` admitted trace records, `0` repaired contexts, `0` full failed contexts admitted.
+  - seed `29`: online `19/25` successes (`0.760`), `19` admitted contexts, `723` admitted trace records, `0` repaired contexts, `0` full failed contexts admitted.
+  - diagnostic note: strict verified-progress repair accepted no failed segments in round 1. This is safe but means FASR may provide little extra training signal unless round 2 contains verified-progress repair segments.
+- Storage check:
+  - `/projects` is `92%` used with about `406G` free.
+  - `/rdss` is `57%` used with about `22T` free.
+  - `/tmp` on the current node is `2%` used with about `6.9T` free.
+  - round-2 demo traces are already large: about `1.67-1.77 GiB` per seed and still growing.
+- Updated ETA:
+  - remaining online collection is about `8-9` contexts per seed, mostly max-horizon hard drawer contexts.
+  - likely collection/finalizer finish: `2026-06-07 03:00-04:30 MDT`.
+  - conservative operational finish window: through `2026-06-07 05:30 MDT`.
+  - next action after completion: inspect round-2 repair/admission summaries first; if repair counts remain zero, decide whether posttrain/eval is still worth running or whether to treat this as a negative strict-FASR diagnostic.
+
+### Corrected-FASR low-budget expansion: completion and held-out eval launch on 2026-06-08
+
+- Context:
+  - user requested the smaller budget points `N=25` and `N=10` before deciding whether CAVER needs method reform before Stage F.
+  - these runs use corrected verified-progress FASR, not the earlier metric-prefix repair diagnostic.
+  - protocol remains proposal-aligned where relevant: `K=4`, `H=4`, GE-Sim live summaries, exact rollout payload, lagged DR path, and exact-offline NFT post-training.
+- Online/finalizer jobs completed cleanly:
+  - `8727`: `N=10`, seed `7`, `COMPLETED`, elapsed `02:44:11`, node `l40s-01`.
+  - `8728`: `N=10`, seed `13`, `COMPLETED`, elapsed `02:50:29`, node `l40s-01`.
+  - `8729`: `N=10`, seed `29`, `COMPLETED`, elapsed `02:20:17`, node `l40s-01`.
+  - `8730`: `N=25`, seed `7`, `COMPLETED`, elapsed `06:22:34`, node `l40s-03`.
+  - `8731`: `N=25`, seed `13`, `COMPLETED`, elapsed `07:02:53`, node `l40s-03`.
+  - `8732`: `N=25`, seed `29`, `COMPLETED`, elapsed `05:54:55`, node `l40s-03`.
+- Online/admission results:
+  - `N=10`, seed `7`: online `8/10 = 0.800`, admitted `8` contexts, `346` demo items, `1374` primitive steps, `0` repair records, `0` full failed contexts admitted.
+  - `N=10`, seed `13`: online `10/10 = 1.000`, admitted `10` contexts, `469` demo items, `1865` primitive steps, `0` repair records, `0` full failed contexts admitted.
+  - `N=10`, seed `29`: online `10/10 = 1.000`, admitted `10` contexts, `383` demo items, `1513` primitive steps, `0` repair records, `0` full failed contexts admitted.
+  - `N=25`, seed `7`: online `19/25 = 0.760`, admitted `19` contexts, `766` demo items, `3033` primitive steps, `0` repair records, `0` full failed contexts admitted.
+  - `N=25`, seed `13`: online `20/25 = 0.800`, admitted `21` contexts, `932` demo items, `3690` primitive steps, `12` repair records from one `two_object_stack_proxy` context, `0` full failed contexts admitted.
+  - `N=25`, seed `29`: online `19/25 = 0.760`, admitted `19` contexts, `690` demo items, `2725` primitive steps, `0` repair records, `0` full failed contexts admitted.
+- Diagnostic interpretation before held-out eval:
+  - exact-payload validation passed for all six `caver_admitted_chunks.jsonl.gz` traces.
+  - repair activation remains minimal, so the low-budget pass mostly tests success-preserving selective admission rather than the full segment-repair mechanism.
+  - `N=10` covers only the earliest block-to-tray portion of the ordered Stage-0 manifest; treat it as a very-low-budget diagnostic, not as a complete five-family claim.
+- Storage state at launch:
+  - `/projects`: about `73T` free.
+  - `/rdss`: about `1.9P` free.
+  - `/tmp`: about `6.9T` free.
+- Submitted exact-offline posttrain/eval jobs at `2026-06-08 10:11 MDT`:
+  - `8768`: `N=10`, seed `7`, artifact root `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_posttrain_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n10__seed7__budget10__20260608T030711Z`.
+  - `8769`: `N=10`, seed `13`, artifact root `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_posttrain_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n10__seed13__budget10__20260608T030711Z`.
+  - `8770`: `N=10`, seed `29`, artifact root `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_posttrain_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n10__seed29__budget10__20260608T030711Z`.
+  - `8771`: `N=25`, seed `7`, artifact root `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_posttrain_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n25__seed7__budget25__20260608T030711Z`.
+  - `8772`: `N=25`, seed `13`, artifact root `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_posttrain_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n25__seed13__budget25__20260608T030712Z`.
+  - `8773`: `N=25`, seed `29`, artifact root `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_posttrain_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n25__seed29__budget25__20260608T030712Z`.
+- Posttrain/eval protocol:
+  - `gpu-l40s`, QoS `normal`, no excluded nodes.
+  - exact-offline NFT backend, held-out validation/test partitions, `H=4`, and held-out evaluation with `K=1` first-action execution.
+  - walltime limit `10:00:00`; conservative endpoint `2026-06-08 20:11 MDT`.
+  - expected finish window is roughly `2026-06-08 14:30-18:30 MDT`.
+- Decision gate:
+  - if corrected FASR at `N=25` reaches or beats vanilla `K=1, N=50` held-out test while using fewer backend records, it is worth keeping as a pre-Stage-F method improvement.
+  - if it does not, the evidence supports reforming the method/paper around the simpler `K=1` baseline pressure point before full PiPER execution.
+
+### Corrected-FASR low-budget held-out results on 2026-06-08
+
+- Posttrain/eval jobs completed cleanly:
+  - `8768`: `N=10`, seed `7`, `COMPLETED`, elapsed `03:37:51`.
+  - `8769`: `N=10`, seed `13`, `COMPLETED`, elapsed `03:53:55`.
+  - `8770`: `N=10`, seed `29`, `COMPLETED`, elapsed `03:38:16`.
+  - `8771`: `N=25`, seed `7`, `COMPLETED`, elapsed `04:23:45`.
+  - `8772`: `N=25`, seed `13`, `COMPLETED`, elapsed `04:55:08`.
+  - `8773`: `N=25`, seed `29`, `COMPLETED`, elapsed `03:59:41`.
+- Held-out results:
+  - `N=10`, seed `7`: validation `0.210`, test `0.220`, online `0.800`, admitted `346` demo items and `1374` primitive steps.
+  - `N=10`, seed `13`: validation `0.200`, test `0.240`, online `1.000`, admitted `469` demo items and `1865` primitive steps.
+  - `N=10`, seed `29`: validation `0.210`, test `0.240`, online `1.000`, admitted `383` demo items and `1513` primitive steps.
+  - aggregate `N=10`: validation `0.207 +/- 0.003`, test `0.233 +/- 0.005`, admitted `399` demo items and `1584` primitive steps.
+  - `N=25`, seed `7`: validation `0.230`, test `0.250`, online `0.760`, admitted `766` demo items and `3033` primitive steps.
+  - `N=25`, seed `13`: validation `0.200`, test `0.220`, online `0.800`, admitted `932` demo items and `3690` primitive steps.
+  - `N=25`, seed `29`: validation `0.230`, test `0.240`, online `0.760`, admitted `690` demo items and `2725` primitive steps.
+  - aggregate `N=25`: validation `0.220 +/- 0.008`, test `0.237 +/- 0.007`, admitted `796` demo items and `3149` primitive steps.
+- Comparison against the strongest vanilla pressure point:
+  - vanilla `K=1`, `N=25`: validation `0.213`, test `0.227`, admitted `1885` demo items and `7521` primitive steps.
+  - vanilla `K=1`, `N=50`: validation `0.220`, test `0.227`, admitted `3816` demo items and `15238` primitive steps.
+  - corrected FASR `N=25` is above vanilla `K=1` mean test success at both `N=25` and `N=50` while using about `58%` fewer demo items than `K=1, N=25` and about `79%` fewer demo items than `K=1, N=50`.
+  - corrected FASR `N=10` also exceeds vanilla `K=1` mean test success, but this point is a very-low-budget diagnostic because it only covers the early block-to-tray portion of the ordered manifest.
+- Updated figure/source:
+  - [stagee_fasr_verified_progress_budget_curve_with_k1.json](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_fasr_verified_progress_budget_curve_with_k1.json)
+  - [stagee_fasr_verified_progress_budget_curve_with_k1.png](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_fasr_verified_progress_budget_curve_with_k1.png)
+  - [stagee_fasr_verified_progress_budget_curve_with_k1.pdf](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_fasr_verified_progress_budget_curve_with_k1.pdf)
+- Current interpretation:
+  - this is the first Stage-E result that directly weakens the "why not just vanilla `K=1`?" objection.
+  - the margin is still small in raw success, so the claim should remain sample-efficiency/data-admission efficiency rather than dominant success.
+  - FASR should be presented as the improved pre-Stage-F CAVER variant, but the paper must state that low-budget `N=10` is not a full-family budget point.
+- Next paper action:
+  - update the Stage-0 table and figure references to include corrected FASR at `N=10`, `N=25`, and `N=50`.
+  - reframe the Stage-E conclusion from "CAVER is comparable but pressured by `K=1`" to "strict CAVER is pressured by `K=1`, while corrected verified-progress FASR modestly improves mean test success with much lower admitted backend data."
+
+### Paper refresh after corrected-FASR low-budget results
+
+- Updated [caver_proposal_positioned.tex](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.tex):
+  - abstract/summary now reports corrected FASR `N=25` and `N=50`, not only the old `N=50` point.
+  - Stage-0 results now separate strict CAVER from corrected verified-progress FASR.
+  - the stale claim that corrected FASR still needed its own budget curve was removed.
+  - the Stage-0 interpretation now says FASR weakens the vanilla `K=1` objection but still does not justify a broad raw-success-dominance claim.
+- Added/refreshed figure artifacts:
+  - [stagee_fasr_verified_progress_budget_curve_with_k1.json](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_fasr_verified_progress_budget_curve_with_k1.json)
+  - [stagee_fasr_verified_progress_budget_curve_with_k1.png](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_fasr_verified_progress_budget_curve_with_k1.png)
+  - [stagee_fasr_verified_progress_budget_curve_with_k1.pdf](/uhome/euijin1/projects/p57098/euijin1/Caver/figures/stagee_fasr_verified_progress_budget_curve_with_k1.pdf)
+- Compiled [caver_proposal_positioned.pdf](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.pdf) successfully with `latexmk -pdf -interaction=nonstopmode -halt-on-error`.
+- Final compile check:
+  - no undefined-reference warnings remained in the final log.
+  - no active Slurm experiment jobs remain, except the current interactive CPU session.
+
+### Paper readability pass for mathematical terminology on 2026-06-08
+
+- Updated [caver_proposal_positioned.tex](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.tex) to make the method easier for a first reader:
+  - rewrote the abstract around the operational question: which actions to verify and which executed records to admit.
+  - added a plain-language guide for decision context, candidate chunk, trusted execution, provider, selector, propensity, calibrator, DR correction, LCB, demo items, and primitive steps.
+  - renamed the master notation table to a reference notation table and explicitly marked it as skippable on first read.
+  - replaced avoidable jargon such as "lagged nuisance model" and "heteroscedastic scale" in reader-facing prose with previous-round prediction model and input-dependent uncertainty.
+  - added plain-language explanations before the candidate-generation, provider-preview, selector, DR-correction, and LCB-admission equations.
+  - added a method-level definition of corrected FASR so the results section does not introduce it only as an unexplained abbreviation.
+  - clarified that vanilla `K=1` intentionally removes the `K=4` candidate wrapper and remains a main pressure-test baseline.
+  - added a Stage-0 vs Stage-1 boundary table separating completed LIBERO evidence from planned PiPER hardware evidence.
+- Recompiled [caver_proposal_positioned.pdf](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.pdf) successfully with `latexmk -pdf -interaction=nonstopmode -halt-on-error`.
+- Final log check found no unresolved references or citations.
+
+### Paper reformulation around CAVER+FASR on 2026-06-08
+
+- Reformulated [caver_proposal_positioned.tex](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.tex) so the method hierarchy is now:
+  - CAVER is the selective-verification framework.
+  - strict CAVER is the conservative LCB-only base rule and ablation.
+  - CAVER+FASR is the main Stage-0 empirical admission rule.
+- Moved FASR from "follow-up extension" language into the formal admission-rule section:
+  - FASR is defined as failure-aware segment repair.
+  - it admits only short verified-progress repair segments from failed episodes.
+  - it does not relabel whole failed episodes as successful demonstrations.
+  - it does not change the backend objective.
+- Updated the Stage-0 results narrative:
+  - strict CAVER remains the backend-data-efficiency base result.
+  - CAVER+FASR is now the headline Stage-0 empirical result because it modestly beats vanilla `K=1` mean held-out test at `N=25` and `N=50` while admitting much less backend data.
+- Updated the Stage-F gate:
+  - CAVER+FASR should be the primary PiPER pilot candidate.
+  - strict CAVER should remain the fallback/base rule.
+  - the FASR progress-label assumption must be validated in shadow mode before a full three-task hardware study.
+- Recompiled [caver_proposal_positioned.pdf](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.pdf) successfully; the final log had no unresolved references or citations.
+
+### External ICLR enhancement bundle review on 2026-06-09
+
+- Reviewed `caver_iclr_enhanced_v2_related_work_bundle.zip`.
+- Integrated the safe writing improvements into the active paper:
+  - full related-work/positioning section;
+  - completed/planned status table;
+  - CAVER variant-name table;
+  - explicit Stage-F readiness gate;
+  - limitations paragraph matching the current Stage-0 evidence.
+- Added the requested CAVER+FASR algorithm box to [caver_proposal_positioned.tex](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.tex).
+- The algorithm now makes strict CAVER a special case of CAVER+FASR with `Mrep=empty`, rather than treating FASR as an informal afterthought.
+- Added `gao2026sword` to [caver_proposal_positioned.bib](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.bib) for the related-work section.
+- Recompiled [caver_proposal_positioned.pdf](/uhome/euijin1/projects/p57098/euijin1/Caver/caver_proposal_positioned.pdf); final log check found no unresolved references, citation warnings, or overfull boxes.
+
+### CAVER+FASR `N=100` budget-cell launch on 2026-06-09
+
+- Motivation:
+  - corrected CAVER+FASR already has held-out budget points at `N=10`, `N=25`, and `N=50`.
+  - the missing `N=100` point is needed to check whether the CAVER+FASR curve remains competitive with vanilla `K=1` as the trusted-execution budget grows.
+- Launcher update:
+  - added explicit `fasr_progress_ranked` support to [submit_stagee_heldout_budget_curve.py](/uhome/euijin1/projects/p57098/euijin1/Caver/scripts/slurm/submit_stagee_heldout_budget_curve.py).
+  - this maps to `selector_mode=k1_guarded_verified_progress_fasr_v1`, `admission_policy=caver_family_segment_repair`, GE-Sim live summaries, exact rollout payload, `K=4`, `H=4`, MLP value proxy, MLP DR calibrator, and exact-offline NFT posttraining.
+  - each Slurm job runs the online round and held-out posttraining/eval inline, so there are no stale `afterok` dependency children if a round fails.
+- Submitted jobs at `2026-06-09 09:46 MDT`:
+  - `8893`: corrected CAVER+FASR `N=100`, seed `7`, run `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n100__seed7__budget100__20260609T154626Z`.
+  - `8894`: corrected CAVER+FASR `N=100`, seed `13`, run `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n100__seed13__budget100__20260609T154626Z`.
+  - `8895`: corrected CAVER+FASR `N=100`, seed `29`, run `/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_budget_curve_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-verified-progress-fasr-n100__seed29__budget100__20260609T154627Z`.
+- Submission record:
+  - [stagee_fasr_n100_submission_20260609.md](/uhome/euijin1/projects/p57098/euijin1/Caver/logs/runtime/stagee_fasr_n100_submission_20260609.md).
+  - [stagee_fasr_n100_submission_20260609.json](/uhome/euijin1/projects/p57098/euijin1/Caver/logs/runtime/stagee_fasr_n100_submission_20260609.json).
+- Scheduler state at launch:
+  - all three jobs started immediately on `gpu-l40s` node `l40s-01`.
+  - no nodes are excluded.
+  - only the current interactive CPU shell was otherwise active for this user.
+- ETA:
+  - walltime limit is `6-09:00:00` per job.
+  - conservative Slurm endpoint is `2026-06-15 18:46 MDT`.
+  - practical finish is expected earlier if online collection and exact-offline held-out eval follow the `N=50` and low-budget timing pattern.
+- Next check:
+  - inspect Slurm stdout/stderr for OpenPI/GE-Sim model-load failures after startup.
+  - verify that context logs begin populating.
+  - when jobs complete, aggregate `N=100` into `figures/stagee_fasr_verified_progress_budget_curve_with_k1.*` and update the paper if the result changes the Stage-0 interpretation.
+- Startup verification at `2026-06-09 09:51 MDT`:
+  - all three jobs remained `RUNNING`.
+  - exact OpenPI policy servers connected successfully on localhost ports `26893`, `26894`, and `26895`.
+  - logs show LIBERO manifest evaluation started for round `1/4`.
+  - `caver_online_chunks.jsonl` has begun writing in each round-001 directory.
+  - the only visible policy-server traceback is the known websocket readiness-probe `InvalidMessage`, not a model-load or CUDA failure.
+
+### FASR fairness-baseline launch on 2026-06-09
+
+- Motivation:
+  - CAVER+FASR uses progress labels, so vanilla `K=1` alone is not a fully information-matched baseline.
+  - The new baselines test whether the Stage-0 gain comes from FASR progress repair alone or from CAVER's provider-aware candidate allocation.
+- Implemented launcher methods:
+  - `k1_fasr`: `K=1`, `selection_policy=first`, no provider, no value proxy, no DR calibrator, FASR admission.
+  - `uniform_k4_fasr`: `K=4`, `selection_policy=uniform`, no provider, no value proxy, no DR calibrator, FASR admission.
+  - both force `demo_trace_write_policy=all` so failed progress-repair segments can be materialized into backend training traces.
+  - both use `admission_policy=caver_family_segment_repair`, `repair_min_progress=0.03`, `repair_min_primitive_steps=4`, `repair_max_regression=0.10`, and `repair_max_trace_records=12`.
+- Submitted jobs at `2026-06-09 10:41 MDT`:
+  - `8899`: `k1_fasr`, `N=25`, seed `7`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed7__budget25__20260609T164124Z`.
+  - `8900`: `k1_fasr`, `N=25`, seed `13`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed13__budget25__20260609T164124Z`.
+  - `8901`: `k1_fasr`, `N=25`, seed `29`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed29__budget25__20260609T164124Z`.
+  - `8902`: `uniform_k4_fasr`, `N=25`, seed `7`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-uniform-k4-fasr-n25__seed7__budget25__20260609T164125Z`.
+  - `8903`: `uniform_k4_fasr`, `N=25`, seed `13`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-uniform-k4-fasr-n25__seed13__budget25__20260609T164125Z`.
+  - `8904`: `uniform_k4_fasr`, `N=25`, seed `29`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-uniform-k4-fasr-n25__seed29__budget25__20260609T164125Z`.
+  - `8905`: `k1_fasr`, `N=50`, seed `7`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n50__seed7__budget50__20260609T164126Z`.
+  - `8906`: `k1_fasr`, `N=50`, seed `13`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n50__seed13__budget50__20260609T164126Z`.
+  - `8907`: `k1_fasr`, `N=50`, seed `29`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n50__seed29__budget50__20260609T164126Z`.
+  - `8908`: `uniform_k4_fasr`, `N=50`, seed `7`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-uniform-k4-fasr-n50__seed7__budget50__20260609T164127Z`.
+  - `8909`: `uniform_k4_fasr`, `N=50`, seed `13`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-uniform-k4-fasr-n50__seed13__budget50__20260609T164127Z`.
+  - `8910`: `uniform_k4_fasr`, `N=50`, seed `29`, run `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/stagee__caver-lagged__manifest-t_train_s0-all-uniform-k4-fasr-n50__seed29__budget50__20260609T164127Z`.
+- Submission record:
+  - [stagee_fasr_fairness_submission_20260609.md](/uhome/euijin1/projects/p57098/euijin1/Caver/logs/runtime/stagee_fasr_fairness_submission_20260609.md).
+  - [stagee_fasr_fairness_submission_20260609.json](/uhome/euijin1/projects/p57098/euijin1/Caver/logs/runtime/stagee_fasr_fairness_submission_20260609.json).
+- Scheduler state at launch:
+  - all 12 jobs started immediately on `gpu-l40s`.
+  - no nodes are excluded.
+  - jobs are independent inline round-plus-posttrain jobs with no `afterok` dependency children.
+- Conservative ETA:
+  - `N=25` walltime endpoint: `2026-06-10 03:41 MDT`.
+  - `N=50` walltime endpoint: `2026-06-10 09:41 MDT`.
+- Decision gate:
+  - if `k1_fasr` matches CAVER+FASR, the current Stage-0 gain is mainly progress-label repair.
+  - if `uniform_k4_fasr` matches CAVER+FASR, candidate multiplicity plus FASR is enough and provider-aware selection is weak.
+  - if CAVER+FASR beats both, the provider-aware selection path adds value beyond FASR.
+- Startup verification at `2026-06-09 10:44 MDT`:
+  - all 12 jobs remained `RUNNING`.
+  - exact OpenPI policy servers connected successfully.
+  - round-001 LIBERO manifest evaluation started for both `N=25` and `N=50`.
+  - `caver_online_chunks.jsonl` and full `caver_online_demo_chunks.jsonl.gz` traces are writing for all jobs.
+  - generated wrapper scripts include `--disable-lagged-dr`; per-round logs show the expected `--skip-dr-calibrator-fit` translation.
+  - command records confirm no `--value-proxy-model-path` or `--dr-calibrator-model-path` is passed for either fairness baseline.
+
+### 2026-06-09 FASR fairness/N100 job completion check and recovery plan
+
+- Slurm completion status:
+  - `8893`, `8894`, `8895` (`CAVER+FASR`, `N=100`) failed with `ExitCode=120:0` after about `03:44` on `gpu-l40s`; no held-out posttrain summaries were produced.
+  - `8899`-`8910` (`k1_fasr` and `uniform_k4_fasr`, `N=25/50`) failed with `ExitCode=120:0` after about `02:49`-`02:51`; no fairness held-out summaries were produced.
+  - these failures are not method results and should not be included in tables.
+- Artifact diagnosis:
+  - `k1_fasr`, `N=25`, seeds `7`, `13`, `29` completed online collection, FASR admission, and top-level round summaries before dying during exact-offline NFT posttraining.
+  - `k1_fasr`, `N=25` online success was `0.40`, `0.40`, and `0.36`; admitted contexts were `10`, `11`, and `9`; demo items were `394`, `389`, and `418`.
+  - reusable exact rollout batches already exist under `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_v1/*k1-fasr-n25*/posttrain_exact_rollout_batch.pt`.
+  - `k1_fasr`, `N=50` only completed the first 25-context round and is incomplete for the `N=50` budget.
+  - `uniform_k4_fasr`, `N=25/50` did not complete reliable top-level finalization and must be rerun rather than recovered.
+  - `CAVER+FASR`, `N=100` failed during round-001 online collection and must be rerun in a slower or split workflow if we still need that point.
+- Recovery decision:
+  - first recover only the reusable `k1_fasr`, `N=25` cells with posttrain-only jobs.
+  - use `gpu-h200` to reduce exact-NFT memory/runtime risk and run the three seeds serially with `afterany` dependencies.
+  - reuse the existing exact rollout batches with `--exact-rollout-batch-path` to avoid repeating trace conversion.
+  - after successful recovery, aggregate `k1_fasr`, `N=25` against CAVER+FASR and vanilla `K=1`.
+  - rerun `uniform_k4_fasr` and `k1_fasr`, `N=50` later as online-only plus separate posttrain jobs, not as large inline batches.
+
+### `k1_fasr`, `N=25` posttrain-only recovery launch on 2026-06-09
+
+- Jobs submitted at `2026-06-09 23:59 MDT`:
+  - `9040`: seed `7`, `gpu-h200`, running on `h200-03`.
+  - `9041`: seed `13`, dependency `afterany:9040`.
+  - `9042`: seed `29`, dependency `afterany:9041`.
+- Resource shape:
+  - partition `gpu-h200`, QoS `normal`, `1 x h200`, `8` CPUs, `128G` memory.
+  - walltime `08:00:00` per seed.
+- Recovery inputs:
+  - round results from `/projects/p57098/euijin1/caver_stagee_fasr_fairness_runs_v1/*k1-fasr-n25*/results`.
+  - existing rollout batches from `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_v1/*k1-fasr-n25*/posttrain_exact_rollout_batch.pt`.
+- Recovery outputs:
+  - `/rdss/p57098/euijin1/caver/stagee_fasr_fairness_posttrain_recovery_v1`.
+  - Slurm logs under `/rdss/p57098/euijin1/caver/logs/slurm`.
+- ETA:
+  - conservative serial-chain endpoint is about `2026-06-10 23:59 MDT`.
+  - if each seed follows prior H200 posttrain timing, practical completion may be earlier.
+- Next check:
+  - confirm `9040` passes exact-NFT training and starts held-out validation/test eval.
+  - after `9040` succeeds, let the chain continue; after all three complete, aggregate `k1_fasr N=25` into the FASR fairness comparison.
+
+### Strict CAVER-LVD plan started on 2026-06-10
+
+- New strict plan file:
+  - [Stage E++ CAVER-LVD.md](/uhome/euijin1/projects/p57098/euijin1/Caver/plans/Stage%20E++%20CAVER-LVD.md).
+- Motivation:
+  - current strict CAVER is data-efficient but does not dominate vanilla `K=1` in raw held-out success.
+  - CAVER+FASR is stronger, but the gain may come from progress-label repair rather than CAVER selection.
+- Method decision:
+  - make the learned distribution over candidate chunks the center of the next method pass.
+  - demote hard LCB/FASR to optional admission variants and ablations.
+- Non-negotiable diagnostic:
+  - compare `caver_lvd`, `caver_lvd_fasr`, `caver_lvd_no_provider`, and `caver_lvd_no_dr` against `vanilla_k1`, `uniform_k4`, `uniform_k4_fasr`, strict CAVER, and CAVER+FASR at `N=50`, seeds `{7,13,29}`.
+- Current implementation focus:
+  - add a serialized LVD selector artifact.
+  - add listwise DR-based selector training.
+  - plumb `selection_policy=caver_lvd` through the LIBERO evaluator and lagged Stage-E wrapper.
+  - do not use the existing K=1 seed DR dataset for LVD listwise training; it has only single-candidate groups.
+  - use existing K=4 CAVER DR datasets only for development smoke tests, not reportable initialization.
+  - run a fair `T_seed_S0`, K=4, uniform-selection seed-calibration pass and train reportable seed LVD artifacts from that counted/common source.
+- Seed-calibration job:
+  - Slurm job `9043`, submitted `2026-06-10 00:50 MDT`.
+  - Run dir: `/rdss/p57098/euijin1/caver/runs/stagee__caver-lagged__manifest-t_seed_s0-all-lvd-seed-calib-k4-uniform__seed7__budget120__20260610T065003Z`.
+  - Conservative end by walltime: `2026-06-15 00:50 MDT`.
+  - After completion, fit reportable `stage0_seed_lvd_selector_*` artifacts, dry-run N=50 LVD cells, then submit strict diagnostics.
+
+### Progress Check: 2026-06-10 01:42 MDT
+
+- `k1_fasr N=25` reusable posttrain recovery jobs:
+  - `9040` seed 7: `FAILED`, exit `255:0`, elapsed `00:25:50`.
+  - `9041` seed 13: `FAILED`, exit `255:0`, elapsed `00:22:16`.
+  - `9042` seed 29: `FAILED`, exit `255:0`, elapsed `00:30:47`.
+- Failure signature:
+  - all three reached exact offline NFT training and failed at FSDP checkpoint save.
+  - repeated root error: `torch.distributed.checkpoint.api.CheckpointException` caused by `OSError: [Errno 5] Input/output error` during `os.fsync(stream.fileno())`.
+  - no `posttrain_holdout_summary.json` was produced for these recovery attempts.
+  - the reusable rollout batches still exist under `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_v1/*k1-fasr-n25*/posttrain_exact_rollout_batch.pt`.
+- Recovery implication:
+  - do not resubmit the same posttrain jobs unchanged.
+  - next recovery attempt should avoid direct FSDP checkpoint writes to the shared filesystem path used by the failing jobs.
+  - preferred fix: train/checkpoint on node-local `/tmp` or another local scratch path, then export/copy the compact OpenPI checkpoint and summaries back to RDSS.
+- Recovery fix implemented:
+  - Added `--training-log-root` and `--cleanup-training-log-dir` to `scripts/stagee/run_stage0_posttrain_from_round.sh`.
+  - Added `--node-local-training-log-root`, `--training-log-root`, and `--cleanup-training-log-dir` passthrough to `scripts/slurm/submit_stage0_posttrain_from_round.sh`.
+  - Dry-run confirmed the FSDP training log/checkpoint path is now `/tmp/.../posttrain_train`, while exported checkpoint and held-out eval outputs remain under RDSS.
+- Corrected recovery smoke job submitted:
+  - Slurm job `9044`, seed 7 only, submitted `2026-06-10 01:48 MDT`.
+  - Partition/GPU: `gpu-h200`, 1 H200 GPU.
+  - Artifact root: `/rdss/p57098/euijin1/caver/stagee_fasr_fairness_posttrain_recovery_localckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed7__budget25__20260609T164124Z`.
+  - Node-local training root: `/tmp/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T074805Z_training_logs`.
+  - Stdout: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T074805Z-9044.out`.
+  - Stderr: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T074805Z-9044.err`.
+  - Walltime: `10:00:00`; first critical gate is whether it passes checkpoint save/export around the 25-40 minute mark.
+  - Do not submit seed 13/29 local-checkpoint recoveries until `9044` passes checkpoint export or produces a different actionable failure.
+- `9043` CAVER-LVD fair seed-calibration job:
+  - state: `RUNNING` on `h200-03`, elapsed about `00:50`.
+  - round 1 compact trace observed: 413 trace records across 6 seed contexts.
+  - all checked records have K=4 probabilities summing to 1 and nonempty candidate metric tables.
+  - GE-Sim worker loaded successfully and processed requests; no immediate import/path/provider failure observed.
+  - practical ETA from early rate: roughly 12-24 hours, with conservative Slurm walltime endpoint still `2026-06-15 00:50 MDT`.
+
+### Progress Check: 2026-06-10 02:22 MDT
+
+- `9044` local-checkpoint smoke result:
+  - status: `FAILED`, exit `1:0`, elapsed `00:28:05`.
+  - the original FSDP checkpoint fsync failure is fixed: training reached `20/20`, exported `posttrain_checkpoint/model.safetensors`, and wrote `posttrain_checkpoint_export.summary.json`.
+  - new failure signature: OpenPI policy server failed to load the exported checkpoint with `safetensors_rust.SafetensorError: Error while deserializing header: InvalidHeaderDeserialization`.
+  - byte-level check showed the RDSS `model.safetensors` first 128 bytes were all zero, so the file was corrupt despite the export summary reporting `812` exported keys.
+- Recovery patch v2:
+  - `scripts/stagee/run_stage0_posttrain_from_round.sh` now exports OpenPI checkpoints to node-local `--training-log-root` first when provided.
+  - the runner load-validates the local safetensors checkpoint, copies the validated export directory to RDSS, then load-validates the RDSS copy before evaluation.
+  - node-local export copies are removed after successful RDSS validation when `--cleanup-training-log-dir` is set.
+- New smoke job submitted:
+  - Slurm job `9045`, seed `7`, submitted `2026-06-10 02:22 MDT`.
+  - Partition/GPU: `gpu-h200`, 1 H200 GPU.
+  - Artifact root: `/rdss/p57098/euijin1/caver/stagee_fasr_fairness_posttrain_recovery_localckpt_v2/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed7__budget25__20260609T164124Z`.
+  - Node-local training/export root: `/tmp/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T082234Z_training_logs`.
+  - Stdout: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T082234Z-9045.out`.
+  - Stderr: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T082234Z-9045.err`.
+  - ETA: checkpoint/export/copy validation gate around `2026-06-10 02:52-03:05 MDT`; full held-out eval may extend beyond that.
+- Next gate:
+  - if `9045` validates both local and RDSS safetensors and starts held-out evaluation, submit seed `13` and seed `29` with the same v2 path.
+  - if RDSS copy validation fails, keep eval on a project or node-local checkpoint path and store only summaries/videos/logs on RDSS.
+
+### Progress Check: 2026-06-10 02:52 MDT
+
+- `9045` local-export/RDSS-copy smoke result:
+  - status: `FAILED`, exit `1:0`, elapsed `00:26:45`.
+  - training completed and local `/tmp` export validation passed: `model.safetensors` opened with `812` keys.
+  - RDSS copy failed with `cp: failed to close ... Input/output error`; copied RDSS file again had an all-zero safetensors header.
+  - conclusion: RDSS is unsafe for the large OpenPI `model.safetensors` checkpoint in this workflow. This is now a storage-path issue, not a training/export issue.
+- Recovery decision:
+  - keep Slurm stdout/stderr and runtime logs on RDSS.
+  - store the large exported OpenPI checkpoint and held-out eval artifacts for this recovery path under the project filesystem instead of RDSS.
+- New project-checkpoint smoke job submitted:
+  - Slurm job `9046`, seed `7`, submitted `2026-06-10 02:52 MDT`.
+  - Artifact root: `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed7__budget25__20260609T164124Z`.
+  - Node-local training/export root: `/tmp/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T085216Z_training_logs`.
+  - Stdout: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T085216Z-9046.out`.
+  - Stderr: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T085216Z-9046.err`.
+  - ETA: checkpoint/export/copy validation gate around `2026-06-10 03:22-03:35 MDT`; held-out eval after that if validation passes.
+- Next gate:
+  - if `9046` validates the project checkpoint and starts/completes held-out eval, submit seeds `13` and `29` using `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1`.
+  - clean corrupt RDSS `model.safetensors` files from `localckpt_v1` and `localckpt_v2` after confirming no useful data is needed from them.
+
+### Progress Check: 2026-06-10 03:22 MDT
+
+- `9046` project-checkpoint smoke gate:
+  - status: `RUNNING`; held-out eval has started.
+  - local `/tmp` export validation passed: `model.safetensors` opened with `812` keys.
+  - project-filesystem checkpoint validation passed: `/projects/.../posttrain_checkpoint/model.safetensors` opened with `812` keys.
+  - this confirms the robust path is node-local training/export plus project-filesystem checkpoint storage; RDSS remains for Slurm/runtime logs only.
+- Remaining `k1_fasr N=25` recovery seeds submitted:
+  - `9047`: seed `13`, submitted `2026-06-10 03:21 MDT`, running on `gpu-h200`.
+  - `9048`: seed `29`, submitted `2026-06-10 03:21 MDT`, running on `gpu-h200`.
+  - artifact root pattern: `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed{13,29}__budget25__20260609T164124Z`.
+  - Slurm logs:
+    - seed 13 stdout/stderr: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed13__budget25__20260610T092141Z-9047.{out,err}`.
+    - seed 29 stdout/stderr: `/rdss/p57098/euijin1/caver/logs/slurm/stagee-posttrain__caver__heldout-n100__seed29__budget25__20260610T092141Z-9048.{out,err}`.
+- ETA:
+  - `9047`/`9048` checkpoint validation gates around `2026-06-10 03:50-04:05 MDT`.
+  - held-out eval completion may take longer; conservative walltime limit is `10:00:00` per job.
+- Cleanup:
+  - removed corrupt RDSS `model.safetensors` files from failed `localckpt_v1` and `localckpt_v2` seed-7 recovery attempts.
+
+### Progress Check: 2026-06-10 03:48 MDT
+
+- `9047` seed-13 recovery passed the storage/export fix gate:
+  - training reached the checkpoint export phase.
+  - local `/tmp` safetensors validation passed with `812` keys.
+  - project-filesystem checkpoint validation passed with `812` keys.
+  - project checkpoint path: `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed13__budget25__20260609T164124Z/posttrain_checkpoint/model.safetensors`.
+- `9048` seed-29 recovery is still running and healthy:
+  - training was at approximately step `17/20`.
+  - expected checkpoint validation gate: around `2026-06-10 03:55-04:15 MDT`.
+- `9046` seed-7 recovery remains in held-out evaluation after passing both checkpoint validation gates.
+- Current conclusion:
+  - node-local FSDP training/export plus project-filesystem checkpoint storage is the working path.
+  - RDSS should not be used for the large OpenPI `model.safetensors`; keep it for Slurm/runtime logs and compact summaries only.
+
+### Progress Check: 2026-06-10 03:58 MDT
+
+- `9048` seed-29 recovery also passed the storage/export fix gate:
+  - training completed all `20/20` backend update steps.
+  - local `/tmp` safetensors validation passed with `812` keys.
+  - project-filesystem checkpoint validation passed with `812` keys.
+  - policy server connected successfully, so held-out evaluation started.
+  - project checkpoint path: `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed29__budget25__20260609T164124Z/posttrain_checkpoint/model.safetensors`.
+- `9046`, `9047`, and `9048` have now all passed the original recovery bug gate:
+  - no FSDP shared-storage `fsync` failure.
+  - no corrupt RDSS checkpoint load.
+  - no corrupt project-storage checkpoint copy.
+- Remaining gate:
+  - wait for held-out evaluation to finish and verify `posttrain_holdout_summary.json` for seeds `7`, `13`, and `29`.
+
+### Progress Check: 2026-06-10 04:05 MDT
+
+- Recovery posttrain/eval jobs:
+  - `9046`, `9047`, and `9048` remain `RUNNING`.
+  - held-out LIBERO evaluation has started for all three seeds.
+  - `posttrain_holdout_summary.json` has not been written yet for any seed.
+  - eval logs show seed 7 progressing through held-out validation contexts; the first context was slow due policy/eval warm-up, then later contexts moved faster.
+- `9043` fair K=4 uniform seed-calibration job:
+  - remains `RUNNING` on `h200-03`.
+  - progress: round 1/5 is at approximately context `22/25`.
+  - current pace suggests an overnight-scale job for the full 120-context calibration pass.
+- Aggregation readiness:
+  - patched `scripts/stagee/plot_stagee_heldout_budget_curve.py` to recognize the newer Stage-E++ methods:
+    - `uniform_k4`, `k1_fasr`, `uniform_k4_fasr`, `caver_lvd`, `caver_lvd_fasr`, `caver_lvd_no_provider`, and `caver_lvd_no_dr`.
+  - dry-run aggregation against the project recovery root succeeded and correctly reported `0` complete and `3` missing cells while summaries are pending.
+
+### Progress Check: 2026-06-10 11:15 MDT
+
+- `k1_fasr N=25` recovery results:
+  - jobs `9046`, `9047`, and `9048` completed cleanly with `ExitCode=0:0`.
+  - all three `posttrain_holdout_summary.json` files exist under `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1`.
+  - aggregate over seeds `{7,13,29}`:
+    - held-out validation success: `0.203 +/- 0.005`.
+    - held-out test success: `0.223 +/- 0.003`.
+    - admitted demo items: `400.3` mean.
+    - primitive steps: `1585.7` mean.
+  - figure/source outputs:
+    - `figures/stagee_k1_fasr_n25_recovery_summary.json`
+    - `figures/stagee_k1_fasr_n25_recovery_summary.png`
+    - `figures/stagee_k1_fasr_n25_recovery_summary.pdf`
+  - caveat remains: this recovery batch still logs the known `num_steps=5` inference warning, so treat it as a fairness diagnostic rather than a strict clean `H=4` proposal-mainline artifact.
+- Failed fair seed-calibration job:
+  - job `9043` failed with `ExitCode=1:0` after completing all `25/25` contexts of round 1.
+  - failure signature: `OSError: [Errno 5] Input/output error` when closing `caver_online_demo_chunks.jsonl.gz` on RDSS.
+  - diagnosis: this is the same RDSS write-path fragility, not a GE-Sim, OpenPI, or method failure.
+- Replacement seed-calibration job:
+  - submitted job `9056` at `2026-06-10 11:11 MDT`.
+  - run root: `/projects/p57098/euijin1/caver_stagee_lvd_seed_calib_runs_v1`.
+  - log root: `/projects/p57098/euijin1/caver_stagee_lvd_seed_calib_logs_v1/slurm`.
+  - run dir: `/projects/p57098/euijin1/caver_stagee_lvd_seed_calib_runs_v1/stagee__caver-lagged__manifest-t_seed_s0-all-lvd-seed-calib-k4-uniform-project-v1__seed7__budget120__20260610T171128Z`.
+  - Slurm logs:
+    - `/projects/p57098/euijin1/caver_stagee_lvd_seed_calib_logs_v1/slurm/stagee__caver-lagged__manifest-t_seed_s0-all-lvd-seed-calib-k4-uniform-project-v1__seed7__budget120__20260610T171128Z-9056.out`
+    - `/projects/p57098/euijin1/caver_stagee_lvd_seed_calib_logs_v1/slurm/stagee__caver-lagged__manifest-t_seed_s0-all-lvd-seed-calib-k4-uniform-project-v1__seed7__budget120__20260610T171128Z-9056.err`
+  - startup check: connected to OpenPI exact policy server and started context `1/25` of round 1.
+  - conservative Slurm walltime endpoint: `2026-06-15 11:11 MDT`.
+  - practical ETA, if the previous round-1 pace holds: roughly overnight to finish the full 120-context pass.
+
+### Parallel Fairness Baseline: 2026-06-10 15:07 MDT
+
+- Submitted the missing `uniform_k4_fasr` fairness baseline in parallel.
+- Purpose:
+  - test whether the CAVER+FASR improvement comes from FASR/progress repair alone or from CAVER's candidate selection plus FASR.
+  - compare directly against `caver_lvd_fasr` and current CAVER+FASR once all summaries exist.
+- Protocol:
+  - method: `uniform_k4_fasr`.
+  - budgets: `N=25` and `N=50`.
+  - seeds: `{7, 13, 29}`.
+  - partition/GPU: `gpu-h200`, `h200`, 1 GPU per job.
+  - selection: `K=4`, uniform random candidate selection.
+  - admission/repair: `caver_family_segment_repair`.
+  - provider/value/DR: disabled for this baseline.
+  - backend: exact-offline NFT posttrain/eval.
+- Storage mitigation:
+  - run, log, and small posttrain artifacts are under RDSS roots.
+  - large RLinf checkpoints and exported `model.safetensors` stay on compute-node `/tmp`.
+  - evaluation uses the node-local exported checkpoint via `--keep-export-node-local`.
+  - this avoids both the full `/projects` filesystem and the known RDSS large-checkpoint corruption path.
+- Jobs:
+  - `9073`: `uniform_k4_fasr`, `N=25`, seed `7`, walltime `17:00:00`.
+  - `9074`: `uniform_k4_fasr`, `N=25`, seed `13`, walltime `17:00:00`.
+  - `9075`: `uniform_k4_fasr`, `N=25`, seed `29`, walltime `17:00:00`.
+  - `9076`: `uniform_k4_fasr`, `N=50`, seed `7`, walltime `23:00:00`.
+  - `9077`: `uniform_k4_fasr`, `N=50`, seed `13`, walltime `23:00:00`.
+  - `9078`: `uniform_k4_fasr`, `N=50`, seed `29`, walltime `23:00:00`.
+- Roots:
+  - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v3`.
+  - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v3`.
+  - Slurm log root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v3/slurm`.
+  - runtime log root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v3/runtime`.
+  - submission record: `logs/runtime/stagee_uniform_k4_fasr_parallel_v3_20260610T210702Z.json`.
+- ETA:
+  - `N=25` conservative upper bound: `2026-06-11 08:07 MDT`.
+  - `N=50` conservative upper bound: `2026-06-11 14:07 MDT`.
+- Next check:
+  - verify that all jobs pass OpenPI startup and reach online contexts.
+  - after completion, aggregate held-out validation/test and compare against CAVER+FASR and `k1_fasr`.
+- Startup health check at `2026-06-10 15:11 MDT`:
+  - all six jobs remained `RUNNING`.
+  - each job connected to its OpenPI exact-policy server.
+  - each job started LIBERO context `1/25`.
+  - trace files were being written, confirming that collection entered the online loop.
+
+### Failed Batch Diagnosis and Recovery: 2026-06-11 01:51 MDT
+
+- Jobs `9073` through `9078` finished with `FAILED`, exit `1:0`.
+- No `uniform_k4_fasr` held-out summaries were produced.
+- Common failure:
+  - online contexts completed, but `libero_remote_eval.py` failed while closing the RDSS gzip demo trace.
+  - representative failure: `OSError: [Errno 5] Input/output error` at `gzip.py close()`.
+  - diagnosis: RDSS is not reliable for multi-GB full-payload gzip demo traces.
+- Related seed-calibration failure:
+  - job `9056` also failed with exit `1:0`.
+  - failure was not storage; it was an artifact consistency bug:
+    - `admission_policy=all_executed_nonerror`
+    - `demo_trace_write_policy=success_only`
+    - artifact builder expected `2051` admitted records but only `451` success-only records were available.
+- Fixes applied:
+  - `run_stage0_caver_round.sh` now supports `CAVER_STAGEE_HEAVY_TRACE_ROOT`.
+  - when this variable is set, full-payload demo/admitted traces are written to compute-node `/tmp`, while durable run directories store lightweight `stagee_trace_source_manifest_v1` pointers.
+  - `run_stage0_caver_round.sh` now forces `demo_trace_write_policy=all` when `admission_policy=all_executed_nonerror`.
+  - `submit_stagee_heldout_budget_curve.py` and `submit_stage0_caver_lagged_budget.sh` now set node-local heavy-trace roots inside Slurm jobs.
+- Recovery submission:
+  - submitted `uniform_k4_fasr` retry batch `v4`.
+  - jobs:
+    - `9099`: `N=25`, seed `7`, walltime `17:00:00`.
+    - `9100`: `N=25`, seed `13`, walltime `17:00:00`.
+    - `9101`: `N=25`, seed `29`, walltime `17:00:00`.
+    - `9102`: `N=50`, seed `7`, walltime `23:00:00`.
+    - `9103`: `N=50`, seed `13`, walltime `23:00:00`.
+    - `9104`: `N=50`, seed `29`, walltime `23:00:00`.
+  - all six started on `gpu-h200`.
+  - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v4`.
+  - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v4`.
+  - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v4`.
+  - submission record: `logs/runtime/stagee_uniform_k4_fasr_parallel_v4_20260611T075105Z.json`.
+- ETA:
+  - `N=25` conservative upper bound: `2026-06-11 18:51 MDT`.
+  - `N=50` conservative upper bound: `2026-06-12 00:51 MDT`.
+- Next check:
+  - verify that `caver_online_demo_chunks.jsonl` in the durable run directory is now a source manifest, not a multi-GB gzip file.
+  - verify that online collection reaches context 1 and then final artifact construction reads the node-local heavy trace successfully.
+- Startup health check at `2026-06-11 01:56 MDT`:
+  - jobs `9099` through `9104` remained running.
+  - all six connected to OpenPI exact-policy servers.
+  - all six started LIBERO context `1/25`.
+  - compact traces were being written.
+  - no durable RDSS `caver_online_demo_chunks.jsonl.gz` was present, confirming that the previous RDSS gzip write path is no longer active during online collection.
+
+### Failed Batch Diagnosis and Recovery: 2026-06-11 08:32 MDT
+
+- Jobs `9099` through `9104` also failed with exit `1:0`; no `uniform_k4_fasr` held-out summaries were produced.
+- The previous heavy-trace fix worked:
+  - online demo traces were written to compute-node `/tmp`.
+  - durable RDSS `caver_online_demo_chunks.jsonl` files were lightweight source manifests.
+- New failure:
+  - online collection completed for the inspected jobs.
+  - artifact construction then failed while writing `caver_selector_contexts.jsonl` directly to RDSS.
+  - representative error: `OSError: [Errno 5] Input/output error` in `build_caver_round_artifacts.py`.
+- Diagnosis:
+  - this is still an active-storage failure, not a GPU, GE-Sim, OpenPI, or CAVER-method failure.
+  - RDSS is acceptable for compact durable summaries, but not reliable for active per-cell artifact writes.
+  - `/projects` is full, so it cannot be used as the active run store.
+- Fix applied:
+  - `scripts/slurm/submit_stagee_heldout_budget_curve.py` now rewrites the generated round job to run the active round under compute-node `/tmp`.
+  - posttrain also uses compute-node `/tmp`.
+  - after successful posttrain, the job copies back only compact summary JSON files to RDSS.
+- Recovery submission:
+  - submitted `uniform_k4_fasr` retry batch `v5`.
+  - jobs:
+    - `9106`: `N=25`, seed `7`, walltime `17:00:00`.
+    - `9107`: `N=25`, seed `13`, walltime `17:00:00`.
+    - `9108`: `N=25`, seed `29`, walltime `17:00:00`.
+    - `9109`: `N=50`, seed `7`, walltime `23:00:00`.
+    - `9110`: `N=50`, seed `13`, walltime `23:00:00`.
+    - `9111`: `N=50`, seed `29`, walltime `23:00:00`.
+  - all six started on `gpu-h200`, node `h200-03`.
+  - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v5`.
+  - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v5`.
+  - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v5`.
+  - submission record: `logs/runtime/uniform_k4_fasr_v5_submission.json`.
+- ETA:
+  - `N=25` conservative upper bound: `2026-06-12 01:32 MDT`.
+  - `N=50` conservative upper bound: `2026-06-12 07:32 MDT`.
+  - practical ETA if there are no new storage failures: roughly `6-10` hours, because v4 already reached completed online contexts in about `3-4` hours before failing.
+- Next check:
+  - confirm the generated local round script uses `/tmp/.../cell_run/results`.
+  - confirm `posttrain_holdout_summary.json` appears under `stagee_uniform_k4_fasr_posttrain_v5`.
+  - aggregate `uniform_k4_fasr` against CAVER+FASR, `k1_fasr`, and vanilla `K=1`.
+
+### Progress Check: 2026-06-11 15:14 MDT
+
+- v5 job states:
+  - `9106`, `9107`, `9108` (`uniform_k4_fasr`, `N=25`) failed with exit `1:0`.
+  - `9109`, `9110`, `9111` (`uniform_k4_fasr`, `N=50`) are still running on `h200-03`.
+- `N=25` failure diagnosis:
+  - online rollout completed for all inspected `N=25` jobs.
+  - the new node-local active-storage path worked; artifacts were under `/tmp/euijin1/caver_stagee_curve/<job>/cell_run`.
+  - failure occurred in the lagged finalizer, not in online collection.
+  - root cause: the finalizer created a trace-source manifest that pointed to per-round trace-source manifests, but `build_caver_round_artifacts.py` only handled one manifest level.
+  - representative error: `KeyError: 'context_id'` while reading a nested `stagee_trace_source_manifest_v1` as if it were a raw trace record.
+- Patch applied:
+  - `build_caver_round_artifacts.py` now resolves nested trace-source manifests recursively.
+  - syntax check passed with `python -m py_compile scripts/stagee/build_caver_round_artifacts.py`.
+- `N=50` live progress:
+  - each job completed round `1/2` with online success `20/25 = 0.800`.
+  - current round-2 progress:
+    - `9109`: context `16/25` of round 2.
+    - `9110`: context `15/25` of round 2.
+    - `9111`: context `14/25` of round 2.
+  - the finalizer patch was applied before these jobs reached finalization, so they should use the patched artifact reader.
+- Current durable summaries:
+  - `posttrain_holdout_summary.json` count under `stagee_uniform_k4_fasr_posttrain_v5`: `0`.
+- Next action:
+  - wait for `9109-9111` to test the patched finalizer on live `N=50` jobs.
+  - if `N=50` succeeds, recover or resubmit the `N=25` cells with the same patch.
+
+### Immediate N=25 Retry: 2026-06-11 17:18 MDT
+
+- Rationale:
+  - although the original cautious plan was to wait for `9109-9111` to validate the patched finalizer, the `N=25` cells are independent and H200 capacity was available.
+  - the patch is localized to nested trace-source manifest reading, so rerunning the failed `N=25` cells in parallel is reasonable.
+- Submitted `uniform_k4_fasr`, `N=25`, v6 retries:
+  - `9138`: seed `7`, walltime `17:00:00`.
+  - `9139`: seed `13`, walltime `17:00:00`.
+  - `9140`: seed `29`, walltime `17:00:00`.
+- Roots:
+  - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v6`.
+  - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v6`.
+  - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v6`.
+  - submission record: `logs/runtime/uniform_k4_fasr_n25_v6_submission.json`.
+- Scheduler note:
+  - an environment-level exclude request for `h200-03` did not take effect; Slurm placed `9138-9140` on `h200-03`.
+  - accepted for now because `h200-03` has 8 H200 GPUs and the earlier six-job v5 launch passed startup.
+- Startup check:
+  - all three jobs are running.
+  - all three entered the lagged wrapper and wrote policy-server log paths.
+- ETA:
+  - conservative walltime upper bound: `2026-06-12 10:18 MDT`.
+  - practical ETA if online and posttrain match recent pace: roughly `2026-06-11 23:30 MDT` to `2026-06-12 03:00 MDT`.
+- Concurrent `N=50` status:
+  - `9109-9111` completed online round `2/2`.
+  - each had round-1 online success `20/25 = 0.800` and round-2 online success `0/25 = 0.000`.
+  - they have entered the patched finalizer/posttrain path; no nested-manifest `KeyError` is visible in the latest log tails.
+
+### Progress Check: 2026-06-11 21:01 MDT
+
+- Slurm state:
+  - `9109`, `9110`, `9111` (`N=50`) are still running.
+  - `9138`, `9139`, `9140` (`N=25` v6 retry) are still running.
+- `N=50` status:
+  - all three completed online collection and passed the previously failing nested-manifest finalizer point.
+  - posttrain started:
+    - `9109`: `2026-06-11 18:32:56 MDT`.
+    - `9111`: `2026-06-11 18:51:42 MDT`.
+    - `9110`: `2026-06-11 19:03:49 MDT`.
+  - held-out eval is in progress.
+  - current held-out eval progress from logs:
+    - `9109`: around `79/100` held-out contexts.
+    - `9110`: around `41/100` held-out contexts.
+    - `9111`: around `33/100` held-out contexts.
+  - no `Traceback`, `KeyError`, RDSS `OSError`, or runtime crash is visible in current tails.
+- `N=25` v6 status:
+  - all three jobs reached context `25/25` starts.
+  - seed `29` already logged online completion: `10/25 = 0.400`.
+  - seeds `7` and `13` are near the end of online rollout; no traceback is visible.
+- Durable summary count:
+  - `posttrain_holdout_summary.json` under v5/v6 roots: `0`.
+- Interpretation:
+  - the nested-manifest patch is validated for the `N=50` finalizer path because posttrain has started.
+  - remaining gate is posttrain completion and compact summary copy-back to RDSS.
+
+### Uniform K4 + FASR Recovery: 2026-06-12 03:30 MDT
+
+- Final state of prior v5/v6 jobs:
+  - `9109`, `9110`, `9111`, `9138`, `9139`, and `9140` all reached held-out evaluation but Slurm marked them `FAILED`.
+  - Failure mode was final compact-artifact copy-back, not online rollout or held-out evaluation.
+  - Representative storage errors were RDSS `OSError: [Errno 5] Input/output error` and `PermissionError: [Errno 13] Permission denied` while copying compact JSON files.
+  - A pinned salvage job on `h200-03` (`9142`) completed, but node-local `/tmp/euijin1/caver_stagee_curve/<job>` directories had already been cleaned up.
+- Log-derived, non-strict result snapshot from failed jobs:
+  - `uniform_k4_fasr`, `N=25` test success by seed was approximately `0.240`, `0.220`, `0.220`; validation was `0.200`, `0.250`, `0.200`.
+  - `uniform_k4_fasr`, `N=50` test success by seed was approximately `0.210`, `0.220`, `0.230`; validation was `0.200`, `0.210`, `0.200`.
+  - These numbers are useful for triage only; the figure/table pipeline still requires clean `posttrain_holdout_summary.json` artifacts.
+- Patch applied:
+  - `scripts/slurm/submit_stagee_heldout_budget_curve.py` now uses metadata-free byte copying with retries instead of `shutil.copy2` for compact artifact copy-back.
+  - Syntax check passed with `python -m py_compile`.
+- Clean v7 rerun submitted:
+  - `9143`: `uniform_k4_fasr`, `N=25`, seed `7`.
+  - `9144`: `uniform_k4_fasr`, `N=25`, seed `13`.
+  - `9145`: `uniform_k4_fasr`, `N=25`, seed `29`.
+  - `9146`: `uniform_k4_fasr`, `N=50`, seed `7`.
+  - `9147`: `uniform_k4_fasr`, `N=50`, seed `13`.
+  - `9148`: `uniform_k4_fasr`, `N=50`, seed `29`.
+- Roots:
+  - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v7`.
+  - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v7`.
+  - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v7`.
+  - submission record: `logs/runtime/uniform_k4_fasr_v7_submission.json`.
+- ETA:
+  - conservative walltime upper bound for `N=25`: `2026-06-12 20:30 MDT`.
+  - conservative walltime upper bound for `N=50`: `2026-06-13 02:30 MDT`.
+  - practical ETA if previous pace repeats: `2026-06-12 afternoon/evening MDT`.

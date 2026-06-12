@@ -1,0 +1,50 @@
+status: scaffold_only
+defaults:
+  max_decision_contexts: 4
+  episode_timeout_s: 60
+  shared_seed_contexts_per_task: 40
+  reset_checklist:
+    - object placement
+    - camera pose
+    - gripper state
+
+labeler_constants:
+  tray_height_margin_m: 0.030
+  bowl_height_margin_m: 0.045
+  stack_planar_tolerance_m: 0.020
+  stack_height_gap_m: 0.030
+  marker_confidence_audit_threshold: 0.90
+  marker_low_confidence_frame_limit: 3
+  marker_audit_window_frames: 10
+
+tasks:
+  block_to_tray:
+    language_instruction: place the block into the tray
+    seed_contexts: 40
+    labeler:
+      type: block_to_tray
+      requires:
+        - inside_tray_xy
+        - height_above_tray_floor_m
+        - final_marker_confidences
+
+  can_to_bowl:
+    language_instruction: place the can into the bowl
+    seed_contexts: 40
+    labeler:
+      type: can_to_bowl
+      requires:
+        - inside_bowl_xy
+        - height_above_bowl_floor_m
+        - final_marker_confidences
+
+  two_block_stack:
+    language_instruction: stack the top block on the bottom block
+    seed_contexts: 40
+    labeler:
+      type: two_block_stack
+      requires:
+        - planar_distance_m
+        - height_gap_m
+        - top_block_above_bottom
+        - final_marker_confidences

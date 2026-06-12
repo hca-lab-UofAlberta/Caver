@@ -2579,3 +2579,257 @@ Our decomposition is more operational than the proposal's paper stages.
       - conclusion for this strict-mainline budget-`50` cell:
         - the end-to-end Stage-E simulation comparison is now complete
         - the strongest support is for a sample-efficiency framing rather than a dominant absolute-success-rate framing
+
+## 2026-06-09 Stage E++ FASR fairness/N100 failure diagnosis
+
+- Completed-job check:
+  - `CAVER+FASR`, `N=100` jobs `8893`-`8895` failed with `ExitCode=120:0` and produced no held-out summaries.
+  - FASR fairness jobs `8899`-`8910` failed with `ExitCode=120:0` and produced no held-out summaries.
+  - current result tables/figures must not treat these failed jobs as completed experiments.
+- Storage issue:
+  - `/projects` reached 100% usage during the completion check, which caused an attempted patch to truncate `plans/overall_plan.md`.
+  - restored `plans/overall_plan.md` from the committed copy and preserved the detailed new recovery record in `plans/Stage E.md`.
+  - cleaned failed/incomplete Stage-E artifact directories for `uniform_k4_fasr`, partial `k1_fasr N=50`, and failed `CAVER+FASR N=100`, freeing about 30 GB on `/projects`.
+  - future recovery outputs should prefer RDSS-backed artifact roots when possible.
+- Usable artifacts:
+  - `k1_fasr`, `N=25`, seeds `7`, `13`, `29` completed online collection and FASR admission before posttraining failed.
+  - online success was `0.40`, `0.40`, and `0.36`; admitted contexts were `10`, `11`, and `9`; demo items were `394`, `389`, and `418`.
+  - exact rollout batches are already materialized and can be reused for posttrain-only recovery.
+- Recovery plan:
+  - submit serial `gpu-h200` posttrain-only jobs for the three reusable `k1_fasr`, `N=25` cells.
+  - use `afterany` dependencies instead of `afterok` chains to avoid stale pending jobs.
+  - rerun incomplete `uniform_k4_fasr`, `k1_fasr N=50`, and `CAVER+FASR N=100` only after the smaller recovery path succeeds.
+
+## 2026-06-09 Stage E++ `k1_fasr N=25` recovery jobs submitted
+
+- Submitted serial H200 posttrain-only recovery jobs:
+  - `9040`: seed `7`, running on `h200-03` at submission check.
+  - `9041`: seed `13`, dependency `afterany:9040`.
+  - `9042`: seed `29`, dependency `afterany:9041`.
+- Resource shape:
+  - `gpu-h200`, QoS `normal`, `1 x h200`, `8` CPUs, `128G`, `08:00:00` per job.
+- Output root:
+  - `/rdss/p57098/euijin1/caver/stagee_fasr_fairness_posttrain_recovery_v1`.
+- Conservative ETA:
+  - serial-chain upper bound is about `2026-06-10 23:59 MDT`.
+- Next action:
+  - check `9040` first; if it completes, wait for `9041` and `9042`.
+  - aggregate the recovered `k1_fasr N=25` results before deciding whether to rerun the remaining fairness baselines.
+
+## 2026-06-10 Stage E++ strict CAVER-LVD pass started
+
+- Created strict plan:
+  - `plans/Stage E++ CAVER-LVD.md`.
+- Purpose:
+  - resolve whether CAVER's learned candidate selection helps beyond vanilla `K=1` and beyond `Uniform K=4 + FASR`.
+- Main method:
+  - learn a verification distribution over candidate chunks from DR pseudo-outcomes and exact logged propensities.
+  - keep the backend unchanged.
+  - use lagged selector updates only.
+- Required `N=50` diagnostics:
+  - `vanilla_k1`.
+  - `uniform_k4`.
+  - `uniform_k4_fasr`.
+  - strict CAVER.
+  - CAVER+FASR.
+  - `caver_lvd`.
+  - `caver_lvd_fasr`.
+  - `caver_lvd_no_provider`.
+  - `caver_lvd_no_dr`.
+- 2026-06-10 update:
+  - Existing seed DR data is K=1 only and cannot train a listwise LVD selector.
+  - Development-only LVD smoke artifacts were fit from prior K=4 CAVER data, but these are not valid reportable initializers because they use prior budget outcomes.
+  - Submitted fair K=4 uniform `T_seed_S0` seed-calibration job `9043` on `gpu-h200`.
+  - Conservative Slurm end time: `2026-06-15 00:50 MDT`.
+  - Next gate: after `9043` finishes, fit reportable seed LVD selectors, dry-run N=50 diagnostics, then submit the strict comparison cells.
+- 2026-06-10 01:42 MDT progress:
+  - `9040`, `9041`, and `9042` all failed with exit `255:0`.
+  - Failure is at FSDP checkpoint save: `torch.distributed.checkpoint` -> `os.fsync` -> `OSError: [Errno 5] Input/output error`.
+  - Do not rerun those posttrain recovery jobs unchanged; next attempt should checkpoint on node-local `/tmp` or equivalent and copy/export compact artifacts back to RDSS.
+  - `9043` remains running and healthy; first-round trace has K=4 probabilities and nonempty candidate metric tables.
+- 2026-06-10 01:48 MDT recovery patch:
+  - Added node-local training/checkpoint support to the posttrain runner and Slurm submitter.
+  - Submitted smoke recovery job `9044` for `k1_fasr N=25` seed 7 only.
+  - `9044` writes FSDP checkpoints to `/tmp/stagee-posttrain__caver__heldout-n100__seed7__budget25__20260610T074805Z_training_logs` and exports compact/eval artifacts to RDSS.
+  - Gate: if `9044` passes checkpoint export, submit seed 13 and seed 29 with the same local-checkpoint mode.
+- 2026-06-10 02:22 MDT recovery patch v2:
+  - `9044` proved that node-local FSDP checkpointing fixes the original `os.fsync` failure, but the RDSS-exported `model.safetensors` was corrupt and failed OpenPI load with `InvalidHeaderDeserialization`.
+  - Patched posttrain export to write and validate `model.safetensors` on node-local storage first, copy the validated export directory to RDSS, then validate the RDSS copy before evaluation.
+  - Submitted smoke job `9045` for `k1_fasr N=25` seed 7 using artifact root `/rdss/p57098/euijin1/caver/stagee_fasr_fairness_posttrain_recovery_localckpt_v2/...seed7...`.
+  - ETA for export/copy validation gate: `2026-06-10 02:52-03:05 MDT`; submit seed 13/29 only after this gate passes.
+- 2026-06-10 02:52 MDT recovery patch v3:
+  - `9045` passed local `/tmp` safetensors validation but failed while copying the 7.5GB `model.safetensors` to RDSS; the RDSS copy again had an all-zero header.
+  - Treat RDSS as unsuitable for these large OpenPI checkpoint files. Keep logs on RDSS, but keep exported checkpoint/eval artifacts on the project filesystem.
+  - Submitted project-checkpoint smoke job `9046` for `k1_fasr N=25` seed 7.
+  - Artifact root: `/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/...seed7...`.
+  - ETA for project checkpoint validation gate: `2026-06-10 03:22-03:35 MDT`.
+- 2026-06-10 03:22 MDT recovery status:
+  - `9046` passed both local `/tmp` and project-filesystem safetensors validation with `812` keys and started held-out eval.
+  - Removed corrupt RDSS checkpoint files from failed `localckpt_v1` and `localckpt_v2` seed-7 attempts.
+  - Submitted remaining project-checkpoint recovery jobs:
+    - `9047`: `k1_fasr N=25`, seed `13`.
+    - `9048`: `k1_fasr N=25`, seed `29`.
+  - `9047`/`9048` checkpoint validation ETA: `2026-06-10 03:50-04:05 MDT`; full held-out eval may run longer.
+- 2026-06-10 03:48 MDT recovery status:
+  - `9047` seed 13 passed local `/tmp` and project-filesystem safetensors validation with `812` keys; the previous FSDP/RDSS corruption path is fixed for this seed.
+  - `9048` seed 29 is still running and healthy at roughly step `17/20`; next gate is project checkpoint validation around `03:55-04:15 MDT`.
+  - `9046` seed 7 remains in held-out evaluation after passing checkpoint validation.
+  - Keep large OpenPI checkpoints on project storage, not RDSS.
+- 2026-06-10 03:58 MDT recovery status:
+  - `9048` seed 29 passed local `/tmp` and project-filesystem safetensors validation with `812` keys and connected to the policy server.
+  - `9046`, `9047`, and `9048` have all passed the recovery bug gate; remaining gate is held-out evaluation completion and `posttrain_holdout_summary.json` verification.
+- 2026-06-10 04:05 MDT recovery/calibration status:
+  - `9046`, `9047`, and `9048` are still running held-out LIBERO evaluation; no `posttrain_holdout_summary.json` files yet.
+  - `9043` fair K=4 uniform seed-calibration is healthy at roughly context `22/25` of round 1/5.
+  - Patched `scripts/stagee/plot_stagee_heldout_budget_curve.py` to aggregate the newer Stage-E++ methods, including `k1_fasr`, `uniform_k4_fasr`, and `caver_lvd*`.
+- 2026-06-10 11:15 MDT recovery/calibration status:
+  - `9046`, `9047`, and `9048` completed cleanly and produced all `k1_fasr N=25` held-out summaries.
+  - recovered aggregate: validation `0.203 +/- 0.005`, test `0.223 +/- 0.003`, admitted demo items `400.3`, primitive steps `1585.7`.
+  - `9043` failed after all round-1 contexts due RDSS gzip close `OSError: [Errno 5] Input/output error`.
+  - submitted replacement project-storage seed-calibration job `9056`, running on `gpu-h200`; it connected to the OpenPI exact policy server and started context 1/25.
+- 2026-06-10 15:07 MDT fairness-baseline submission:
+  - submitted the missing `uniform_k4_fasr` baseline in parallel.
+  - jobs:
+    - `9073`: `N=25`, seed `7`, walltime `17:00:00`.
+    - `9074`: `N=25`, seed `13`, walltime `17:00:00`.
+    - `9075`: `N=25`, seed `29`, walltime `17:00:00`.
+    - `9076`: `N=50`, seed `7`, walltime `23:00:00`.
+    - `9077`: `N=50`, seed `13`, walltime `23:00:00`.
+    - `9078`: `N=50`, seed `29`, walltime `23:00:00`.
+  - all jobs started on `gpu-h200`.
+  - roots:
+    - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v3`.
+    - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v3`.
+    - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v3`.
+    - submission record: `logs/runtime/stagee_uniform_k4_fasr_parallel_v3_20260610T210702Z.json`.
+  - storage patch:
+    - inline posttrain now uses compute-node `/tmp` for checkpoint/export and `--keep-export-node-local` for held-out eval.
+    - RDSS stores durable logs and summaries only; `/projects` is currently too full for six more 7.5GB OpenPI exports.
+  - conservative ETA:
+    - `N=25`: `2026-06-11 08:07 MDT`.
+    - `N=50`: `2026-06-11 14:07 MDT`.
+  - purpose:
+    - determine whether CAVER+FASR beats FASR with the same `K=4` wrapper but uniform selection.
+  - startup health check at `2026-06-10 15:11 MDT`:
+    - all six jobs remained running.
+    - every job connected to OpenPI exact-policy server and started LIBERO context `1/25`.
+    - trace files were being written, so the batch is past shell/import/policy-server startup.
+- 2026-06-11 01:51 MDT failure/recovery status:
+  - jobs `9073` through `9078` failed; no held-out summaries were produced.
+  - common failure was RDSS gzip close on multi-GB full-payload demo traces: `OSError: [Errno 5] Input/output error`.
+  - job `9056` also failed due `all_executed_nonerror` being paired with `success_only` demo trace writing, causing artifact count mismatch.
+  - patched heavy-trace handling:
+    - full-payload demo/admitted traces now go to compute-node `/tmp` through `CAVER_STAGEE_HEAVY_TRACE_ROOT`.
+    - durable run directories store lightweight source manifests.
+    - `all_executed_nonerror` now forces all executed trace writing.
+  - submitted `uniform_k4_fasr` recovery batch `v4`:
+    - `9099`: `N=25`, seed `7`.
+    - `9100`: `N=25`, seed `13`.
+    - `9101`: `N=25`, seed `29`.
+    - `9102`: `N=50`, seed `7`.
+    - `9103`: `N=50`, seed `13`.
+    - `9104`: `N=50`, seed `29`.
+  - roots:
+    - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v4`.
+    - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v4`.
+    - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v4`.
+    - submission record: `logs/runtime/stagee_uniform_k4_fasr_parallel_v4_20260611T075105Z.json`.
+  - conservative ETA:
+    - `N=25`: `2026-06-11 18:51 MDT`.
+    - `N=50`: `2026-06-12 00:51 MDT`.
+  - hold the seed-calibration retry until this v4 heavy-trace fix is confirmed.
+  - startup health check at `2026-06-11 01:56 MDT`:
+    - jobs `9099` through `9104` remained running.
+    - all six connected to OpenPI exact-policy servers and started LIBERO context `1/25`.
+    - compact traces were being written.
+    - no durable RDSS `caver_online_demo_chunks.jsonl.gz` was present, confirming the old RDSS gzip path is no longer active during online collection.
+- 2026-06-11 08:32 MDT failure/recovery status:
+  - jobs `9099` through `9104` failed after online rollout; no held-out summaries were produced.
+  - the node-local heavy-trace fix worked, but artifact construction still wrote active JSONL directly to RDSS and failed with `OSError: [Errno 5] Input/output error`.
+  - `/projects` is full, so the active experiment path cannot move there.
+  - patched `submit_stagee_heldout_budget_curve.py` so each inline job:
+    - rewrites the generated round job to use compute-node `/tmp` for the active run directory.
+    - runs posttrain/checkpoint/export under compute-node `/tmp`.
+    - copies only compact summary JSON files back to RDSS after successful posttrain.
+  - submitted `uniform_k4_fasr` recovery batch `v5`:
+    - `9106`: `N=25`, seed `7`.
+    - `9107`: `N=25`, seed `13`.
+    - `9108`: `N=25`, seed `29`.
+    - `9109`: `N=50`, seed `7`.
+    - `9110`: `N=50`, seed `13`.
+    - `9111`: `N=50`, seed `29`.
+  - all six started on `gpu-h200`, node `h200-03`.
+  - roots:
+    - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v5`.
+    - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v5`.
+    - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v5`.
+    - submission record: `logs/runtime/uniform_k4_fasr_v5_submission.json`.
+  - conservative ETA:
+    - `N=25`: `2026-06-12 01:32 MDT`.
+    - `N=50`: `2026-06-12 07:32 MDT`.
+  - decision gate remains unchanged:
+    - if `uniform_k4_fasr` matches CAVER+FASR, the gain is mostly FASR/progress-label driven.
+    - if CAVER+FASR or CAVER-LVD+FASR beats `uniform_k4_fasr`, the selector has evidence beyond FASR alone.
+- 2026-06-11 15:14 MDT progress:
+  - `9106`, `9107`, and `9108` (`uniform_k4_fasr`, `N=25`) failed after completing online rollout.
+  - failure was a nested trace-source manifest bug in the lagged finalizer, not GPU/GE-Sim/OpenPI/storage.
+  - patched `build_caver_round_artifacts.py` to recursively resolve nested `stagee_trace_source_manifest_v1` manifests.
+  - syntax check passed.
+  - `9109`, `9110`, and `9111` (`uniform_k4_fasr`, `N=50`) remain running on `h200-03`.
+  - live progress:
+    - all three completed round `1/2` with online success `20/25 = 0.800`.
+    - `9109` is at context `16/25` of round 2.
+    - `9110` is at context `15/25` of round 2.
+    - `9111` is at context `14/25` of round 2.
+  - current v5 held-out summary count is still `0`.
+  - next gate:
+    - wait for `9109-9111` to validate the patched finalizer.
+    - then recover/resubmit the failed `N=25` cells.
+- 2026-06-11 17:18 MDT immediate retry:
+  - submitted `uniform_k4_fasr`, `N=25`, v6 retries with the nested-manifest patch:
+    - `9138`: seed `7`.
+    - `9139`: seed `13`.
+    - `9140`: seed `29`.
+  - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v6`.
+  - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v6`.
+  - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v6`.
+  - submission record: `logs/runtime/uniform_k4_fasr_n25_v6_submission.json`.
+  - Slurm placed all three on `h200-03`; keep monitoring for startup/resource contention.
+  - conservative ETA: `2026-06-12 10:18 MDT`.
+  - practical ETA if recent pace holds: `2026-06-11 23:30 MDT` to `2026-06-12 03:00 MDT`.
+  - `9109-9111` completed online round `2/2` and are in the patched finalizer/posttrain stage.
+- 2026-06-11 21:01 MDT progress:
+  - `9109`, `9110`, and `9111` passed the previous nested-manifest finalizer failure point and started posttrain.
+  - held-out eval is in progress, with latest visible progress around:
+    - `9109`: `79/100` held-out contexts.
+    - `9110`: `41/100` held-out contexts.
+    - `9111`: `33/100` held-out contexts.
+  - `9138`, `9139`, and `9140` remain running; all reached context `25/25` starts, and seed `29` logged online completion `10/25 = 0.400`.
+  - no new traceback/storage/runtime failure is visible.
+  - current v5/v6 held-out summary count: `0`.
+- Implementation begins with:
+  - LVD selector model artifact.
+  - listwise LVD trainer from `caver_dr_candidate_dataset.jsonl`.
+  - `selection_policy=caver_lvd` plumbing.
+  - smoke tests on the existing seed DR dataset before Slurm submission.
+
+## Current Active Stage-E Control: 2026-06-12 03:30 MDT
+
+- Active work is not a new method change; it is a clean recovery rerun for the fairness control `uniform_k4_fasr`.
+- Why:
+  - v5/v6 `uniform_k4_fasr` jobs reached evaluation but failed during compact artifact copy-back to RDSS.
+  - no strict `posttrain_holdout_summary.json` files survived, so parsed stderr is not sufficient for final figures/tables.
+- Fix:
+  - `scripts/slurm/submit_stagee_heldout_budget_curve.py` now uses metadata-free byte copying with retries instead of `shutil.copy2`.
+  - node-local salvage job `9142` confirmed `/tmp` outputs were already cleaned.
+- Clean v7 jobs now running:
+  - `9143`, `9144`, `9145`: `uniform_k4_fasr`, `N=25`, seeds `7`, `13`, `29`.
+  - `9146`, `9147`, `9148`: `uniform_k4_fasr`, `N=50`, seeds `7`, `13`, `29`.
+- Roots:
+  - run root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_runs_v7`.
+  - posttrain root: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_posttrain_v7`.
+  - logs: `/rdss/p57098/euijin1/caver/stagee_uniform_k4_fasr_logs_v7`.
+  - submission record: `logs/runtime/uniform_k4_fasr_v7_submission.json`.
+- ETA:
+  - conservative walltime upper bounds: `2026-06-12 20:30 MDT` for `N=25`, `2026-06-13 02:30 MDT` for `N=50`.
+  - practical ETA if previous pace repeats: `2026-06-12 afternoon/evening MDT`.

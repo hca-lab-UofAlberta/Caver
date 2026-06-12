@@ -28,9 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-path", required=True, help="Output JSON path for the training summary.")
     parser.add_argument(
         "--target-key",
-        default="dr_pseudo_outcome_clipped",
+        default="dr_pseudo_outcome",
         choices=("dr_pseudo_outcome", "dr_pseudo_outcome_clipped"),
-        help="Dataset target used for calibrator fitting (default: dr_pseudo_outcome_clipped).",
+        help="Dataset target used for calibrator fitting (default: raw dr_pseudo_outcome).",
     )
     parser.add_argument("--model-id", default=None, help="Optional explicit model id written into the artifact.")
     parser.add_argument("--epochs", type=int, default=250, help="Maximum training epochs (default: 250).")

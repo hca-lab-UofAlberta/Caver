@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import collections
 from dataclasses import dataclass
+import gzip
 import json
 import logging
 import math
@@ -27,13 +28,17 @@ if str(_STAGEE_DIR) not in sys.path:
     sys.path.append(str(_STAGEE_DIR))
 
 from caver_heuristic import append_selector_history
+from caver_heuristic import compute_progress_value_from_semantic_state
 from caver_heuristic import compute_selector_decision
 from caver_heuristic import make_selector_history
+
+K1_GUARDED_CAVER_MIXTURE_MASS = 0.50
 from libero_gesim_provider import extract_libero_gesim_provider_observation
 from libero_gesim_provider import LIBERO_GESIM_HISTORY_LENGTH
 from libero_gesim_provider import write_libero_gesim_bundle
 from stage0_value_proxy import load_value_proxy_model
 from stagee_dr_calibration import load_stagee_dr_calibrator_model
+from stagee_lvd_selector import load_lvd_selector_model
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_TASK_SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10", "libero_90")
@@ -140,7 +145,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--selection-policy",
         default="first",
-        choices=("first", "uniform", "caver_heuristic"),
+        choices=("first", "uniform", "caver_heuristic", "caver_k1_guarded", "caver_lvd"),
         help="Chunk selector applied across the sampled candidates at each policy query.",
     )
     parser.add_argument(
@@ -158,6 +163,11 @@ def parse_args() -> argparse.Namespace:
         "--dr-calibrator-model-path",
         default=None,
         help="Optional lagged Stage-E DR calibrator JSON used to refresh selector utility inputs.",
+    )
+    parser.add_argument(
+        "--lvd-selector-model-path",
+        default=None,
+        help="Optional CAVER-LVD selector JSON used by selection_policy=caver_lvd.",
     )
     parser.add_argument("--num-steps-wait", type=int, default=10)
     parser.add_argument("--replan-steps", type=int, default=5)
@@ -225,6 +235,52 @@ def parse_args() -> argparse.Namespace:
             "Optional JSONL path for chunk-level step traces. "
             "Each record captures one policy query and the executed primitive actions beneath it."
         ),
+    )
+    parser.add_argument(
+        "--demo-trace-path",
+        default=None,
+        help="Optional full observation-bearing JSONL/JSONL.GZ trace for backend demo conversion.",
+    )
+    parser.add_argument(
+        "--demo-trace-write-policy",
+        default="all",
+        choices=("all", "success_only"),
+        help="Which full traces to write to --demo-trace-path. Selector traces are unaffected.",
+    )
+    parser.add_argument(
+        "--trace-policy-aux-mode",
+        default="full",
+        choices=("full", "summary", "none"),
+        help="Amount of policy auxiliary payload stored in traces.",
+    )
+    parser.add_argument(
+        "--demo-trace-policy-aux-mode",
+        default="full",
+        choices=("full", "summary", "none"),
+        help=(
+            "Amount of policy auxiliary payload stored in the full demo trace. "
+            "Keep this at 'full' for exact_offline_nft because it needs NFT tensors."
+        ),
+    )
+    parser.add_argument(
+        "--trace-next-obs-mode",
+        default="all",
+        choices=("all", "last"),
+        help="Store every next observation or only the final next observation per chunk.",
+    )
+    parser.add_argument(
+        "--trace-stage0-progress",
+        action="store_true",
+        help=(
+            "Attach compact LIBERO semantic state and verified Stage-0 progress values "
+            "to chunk traces for progress-based segment repair."
+        ),
+    )
+    parser.add_argument(
+        "--trace-observation-mode",
+        default="full",
+        choices=("full", "none"),
+        help="Use 'none' for compact selector traces that omit image/state observations.",
     )
     return parser.parse_args()
 
@@ -747,10 +803,142 @@ def extract_policy_observation(
     }
 
 
+def _serializable_position(value: Any) -> list[float] | None:
+    try:
+        array = np.asarray(value, dtype=np.float64).reshape(-1)
+    except Exception:  # noqa: BLE001
+        return None
+    if array.size < 3:
+        return None
+    return [float(item) for item in array[:3]]
+
+
+def extract_stage0_semantic_state(
+    obs: dict[str, Any],
+    *,
+    env: OffScreenRenderEnv,
+    context: EvalContext,
+    task_description: str,
+) -> dict[str, Any]:
+    object_positions: dict[str, list[float]] = {}
+    for key, value in obs.items():
+        if key.startswith("robot0"):
+            continue
+        if not key.endswith("_pos") or "_to_robot0" in key:
+            continue
+        position = _serializable_position(value)
+        if position is not None:
+            object_positions[key[: -len("_pos")]] = position
+
+    site_positions: dict[str, list[float]] = {}
+    for site_index in range(env.sim.model.nsite):
+        site_name = env.sim.model.site_id2name(site_index)
+        if not site_name:
+            continue
+        lowered = site_name.lower()
+        if not any(token in lowered for token in ("basket", "tray", "caddy", "contain", "region", "cabinet")):
+            continue
+        site_positions[site_name] = [float(item) for item in env.sim.data.site_xpos[site_index].tolist()]
+
+    body_positions: dict[str, list[float]] = {}
+    for body_index in range(env.sim.model.nbody):
+        body_name = env.sim.model.body_id2name(body_index)
+        if not body_name:
+            continue
+        lowered = body_name.lower()
+        if not any(token in lowered for token in ("basket", "tray", "caddy", "cabinet")):
+            continue
+        body_positions[body_name] = [float(item) for item in env.sim.data.body_xpos[body_index].tolist()]
+
+    joint_qpos: dict[str, float] = {}
+    for joint_index in range(env.sim.model.njnt):
+        joint_name = env.sim.model.joint_id2name(joint_index)
+        if not joint_name:
+            continue
+        lowered = joint_name.lower()
+        if not any(token in lowered for token in ("drawer", "cabinet", "level")):
+            continue
+        try:
+            qpos = np.asarray(env.sim.data.get_joint_qpos(joint_name), dtype=np.float64).reshape(-1)
+        except Exception:  # noqa: BLE001
+            continue
+        if qpos.size == 1:
+            joint_qpos[joint_name] = float(qpos[0])
+
+    semantic_state = {
+        "semantic_state_schema": "libero_stage0_semantic_state_v1",
+        "context_id": context.context_id,
+        "proxy_family_id": context.proxy_family_id,
+        "proposal_task": context.proposal_task,
+        "task_description": str(task_description),
+        "task_id": context.task_id,
+        "object_positions": object_positions,
+        "site_positions": site_positions,
+        "body_positions": body_positions,
+        "joint_qpos": joint_qpos,
+    }
+    semantic_state["progress"] = compute_progress_value_from_semantic_state(semantic_state)
+    return semantic_state
+
+
 def write_jsonl_record(handle: TextIO, payload: dict[str, Any]) -> None:
     json.dump(payload, handle, sort_keys=True, default=json_default)
     handle.write("\n")
     handle.flush()
+
+
+def compact_policy_aux_payload(payload: dict[str, Any] | None, *, mode: str) -> dict[str, Any] | None:
+    if payload is None or mode == "none":
+        return None
+    if mode == "full":
+        return payload
+    compact: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            compact[key] = value
+        elif isinstance(value, np.ndarray):
+            compact[key] = {
+                "shape": list(value.shape),
+                "dtype": str(value.dtype),
+                "mean": float(np.mean(value)) if value.size else 0.0,
+                "std": float(np.std(value)) if value.size else 0.0,
+            }
+        elif isinstance(value, (list, tuple)) and len(value) <= 16:
+            compact[key] = value
+        else:
+            compact[key] = {
+                "type": type(value).__name__,
+                "length": len(value) if hasattr(value, "__len__") else None,
+            }
+    return compact or None
+
+
+def prepare_trace_record_for_write(record: dict[str, Any], args: argparse.Namespace, *, full_demo: bool) -> dict[str, Any]:
+    prepared = dict(record)
+    policy_aux_mode = args.demo_trace_policy_aux_mode if full_demo else args.trace_policy_aux_mode
+    if policy_aux_mode != "full":
+        prepared["candidate_policy_aux"] = [
+            compact_policy_aux_payload(payload, mode=policy_aux_mode)
+            for payload in prepared.get("candidate_policy_aux", [])
+        ]
+        prepared["selected_policy_aux"] = compact_policy_aux_payload(
+            prepared.get("selected_policy_aux"),
+            mode=policy_aux_mode,
+        )
+    if args.trace_next_obs_mode == "last":
+        next_obs = prepared.get("next_obs_sequence") or []
+        prepared["next_obs_sequence"] = next_obs[-1:] if next_obs else []
+    if not full_demo and args.trace_observation_mode == "none":
+        prepared.pop("obs", None)
+        prepared.pop("next_obs_sequence", None)
+        prepared["observation_payload_mode"] = "omitted"
+    return prepared
+
+
+def open_text_maybe_gzip(path: Path, mode: str) -> TextIO:
+    if path.suffix == ".gz":
+        return gzip.open(path, mode, encoding="utf-8")  # type: ignore[return-value]
+    return path.open(mode, encoding="utf-8")
 
 
 def run_episode(
@@ -767,11 +955,13 @@ def run_episode(
     context: EvalContext,
     budget_record: dict[str, Any],
     transition_trace_handle: TextIO | None,
+    demo_trace_handle: TextIO | None,
     selection_rng: np.random.Generator | None,
     selector_seed: int | None,
     selector_history: collections.deque[np.ndarray],
     value_proxy_model: dict[str, Any] | None,
     dr_calibrator_model: dict[str, Any] | None,
+    lvd_selector_model: dict[str, Any] | None,
     gesim_worker_client: GesimPersistentWorkerClient | None,
 ) -> dict[str, Any]:
     env.reset()
@@ -785,6 +975,7 @@ def run_episode(
     policy_query_index = 0
     chunk_traces_written = 0
     active_chunk_trace: dict[str, Any] | None = None
+    context_demo_chunk_traces: list[dict[str, Any]] = []
     selected_candidate_probabilities: list[float] = []
     selected_candidate_indices: list[int] = []
     candidate_probability_vectors: list[list[float]] = []
@@ -797,7 +988,9 @@ def run_episode(
 
     def flush_chunk_trace(reason: str, *, trace_error: str | None = None) -> None:
         nonlocal active_chunk_trace, chunk_traces_written
-        if transition_trace_handle is None or active_chunk_trace is None:
+        if active_chunk_trace is None:
+            return
+        if transition_trace_handle is None and demo_trace_handle is None:
             active_chunk_trace = None
             return
         if not active_chunk_trace["actions"]:
@@ -806,7 +999,17 @@ def run_episode(
         active_chunk_trace["completed_reason"] = reason
         active_chunk_trace["error"] = trace_error
         active_chunk_trace["steps_executed"] = len(active_chunk_trace["actions"])
-        write_jsonl_record(transition_trace_handle, active_chunk_trace)
+        if transition_trace_handle is not None:
+            write_jsonl_record(
+                transition_trace_handle,
+                prepare_trace_record_for_write(active_chunk_trace, args, full_demo=False),
+            )
+        if demo_trace_handle is not None:
+            demo_record = prepare_trace_record_for_write(active_chunk_trace, args, full_demo=True)
+            if args.demo_trace_write_policy == "all":
+                write_jsonl_record(demo_trace_handle, demo_record)
+            elif args.demo_trace_write_policy == "success_only":
+                context_demo_chunk_traces.append(demo_record)
         chunk_traces_written += 1
         active_chunk_trace = None
 
@@ -817,6 +1020,16 @@ def run_episode(
                 continue
 
             policy_obs = extract_policy_observation(obs, resize_size=args.resize_size)
+            stage0_semantic_state = (
+                extract_stage0_semantic_state(
+                    obs,
+                    env=env,
+                    context=context,
+                    task_description=str(task_description),
+                )
+                if args.trace_stage0_progress
+                else None
+            )
             if provider_observation_history is not None:
                 provider_observation_history.append(
                     extract_libero_gesim_provider_observation(obs, env=env)
@@ -907,9 +1120,35 @@ def run_episode(
                     selected_candidate_index = int(selection_rng.integers(0, len(candidate_chunks)))
                     selected_candidate_probability = 1.0 / float(len(candidate_chunks))
                     candidate_probabilities = [selected_candidate_probability] * len(candidate_chunks)
-                elif args.selection_policy == "caver_heuristic":
+                    if value_proxy_model is not None or dr_calibrator_model is not None or args.provider_mode != "none":
+                        selector_diagnostics = compute_selector_decision(
+                            candidate_chunks,
+                            safe_candidate_mask=safe_candidate_mask,
+                            candidate_provider_aux=candidate_provider_aux_payloads,
+                            history_vectors=selector_history,
+                            rng=None,
+                            value_proxy_model=value_proxy_model,
+                            dr_calibrator_model=dr_calibrator_model,
+                            lvd_selector_model=None,
+                            proxy_family_id=context.proxy_family_id,
+                            policy_query_index=policy_query_index,
+                        )
+                        candidate_metric_table = [
+                            {
+                                key: value
+                                for key, value in metric.items()
+                                if key != "base_feature_vector"
+                            }
+                            for metric in selector_diagnostics["candidate_metrics"]
+                        ]
+                        selector_score_table = list(selector_diagnostics["candidate_scores"])
+                        selector_value_proxy_source = selector_diagnostics.get("value_proxy_source")
+                        selector_value_proxy_model_id = selector_diagnostics.get("value_proxy_model_id")
+                        selector_utility_scale_source = selector_diagnostics.get("utility_scale_source")
+                        selector_utility_scale_model_id = selector_diagnostics.get("utility_scale_model_id")
+                elif args.selection_policy in {"caver_heuristic", "caver_k1_guarded", "caver_lvd"}:
                     if selection_rng is None:
-                        raise RuntimeError("selection RNG is unavailable for caver_heuristic candidate selection")
+                        raise RuntimeError(f"selection RNG is unavailable for {args.selection_policy} candidate selection")
                     selector_decision = compute_selector_decision(
                         candidate_chunks,
                         safe_candidate_mask=safe_candidate_mask,
@@ -918,12 +1157,42 @@ def run_episode(
                         rng=selection_rng,
                         value_proxy_model=value_proxy_model,
                         dr_calibrator_model=dr_calibrator_model,
+                        lvd_selector_model=lvd_selector_model,
                         proxy_family_id=context.proxy_family_id,
                         policy_query_index=policy_query_index,
                     )
-                    selected_candidate_index = int(selector_decision["selected_candidate_index"])
-                    selected_candidate_probability = float(selector_decision["selected_candidate_probability"])
                     candidate_probabilities = list(selector_decision["candidate_probabilities"])
+                    if args.selection_policy == "caver_k1_guarded":
+                        if safe_candidate_mask[0]:
+                            guarded_mass = float(K1_GUARDED_CAVER_MIXTURE_MASS)
+                            candidate_probabilities = [
+                                float((1.0 - guarded_mass) * probability)
+                                for probability in candidate_probabilities
+                            ]
+                            candidate_probabilities[0] += guarded_mass
+                            safe_total = sum(
+                                probability
+                                for probability, is_safe in zip(candidate_probabilities, safe_candidate_mask)
+                                if is_safe
+                            )
+                            candidate_probabilities = [
+                                float(probability / safe_total) if is_safe else 0.0
+                                for probability, is_safe in zip(candidate_probabilities, safe_candidate_mask)
+                            ]
+                        safe_probability_vector = [candidate_probabilities[index] for index in safe_candidate_indices]
+                        safe_probability_total = sum(safe_probability_vector)
+                        safe_probability_vector = [value / safe_probability_total for value in safe_probability_vector]
+                        draw = float(selection_rng.random())
+                        cumulative = 0.0
+                        selected_candidate_index = safe_candidate_indices[-1]
+                        for candidate_index, probability in zip(safe_candidate_indices, safe_probability_vector):
+                            cumulative += probability
+                            if draw <= cumulative:
+                                selected_candidate_index = candidate_index
+                                break
+                    else:
+                        selected_candidate_index = int(selector_decision["selected_candidate_index"])
+                    selected_candidate_probability = float(candidate_probabilities[selected_candidate_index])
                     candidate_metric_table = []
                     for metric in selector_decision["candidate_metrics"]:
                         metric_record = {
@@ -941,7 +1210,15 @@ def run_episode(
                     selector_value_proxy_model_id = selector_decision.get("value_proxy_model_id")
                     selector_utility_scale_source = selector_decision.get("utility_scale_source")
                     selector_utility_scale_model_id = selector_decision.get("utility_scale_model_id")
-                    append_selector_history(selector_history, selector_decision["selected_base_feature_vector"])
+                    if args.selection_policy == "caver_k1_guarded":
+                        selector_mode = f"{selector_mode}__k1_guarded_mixture_v1"
+                        selector_weights["k1_guarded_caver_mixture_mass"] = float(K1_GUARDED_CAVER_MIXTURE_MASS)
+                        selected_base_feature_vector = selector_decision["candidate_metrics"][selected_candidate_index][
+                            "base_feature_vector"
+                        ]
+                    else:
+                        selected_base_feature_vector = selector_decision["selected_base_feature_vector"]
+                    append_selector_history(selector_history, selected_base_feature_vector)
                 else:
                     candidate_probabilities[0] = 1.0
 
@@ -973,6 +1250,15 @@ def run_episode(
                     "candidate_provider_aux": candidate_provider_aux_payloads,
                     "selected_policy_aux": candidate_policy_aux_payloads[selected_candidate_index],
                     "selected_provider_aux": candidate_provider_aux_payloads[selected_candidate_index],
+                    "stage0_progress_logging": bool(args.trace_stage0_progress),
+                    "stage0_semantic_state_start": stage0_semantic_state,
+                    "stage0_progress_start": (
+                        None
+                        if stage0_semantic_state is None
+                        else stage0_semantic_state.get("progress")
+                    ),
+                    "stage0_semantic_state_sequence": [],
+                    "stage0_progress_sequence": [],
                     "actions": [],
                     "rewards": [],
                     "dones": [],
@@ -1014,6 +1300,16 @@ def run_episode(
             truncated = policy_steps >= max_steps and not terminated
             done = bool(terminated or truncated)
             next_policy_obs = extract_policy_observation(obs, resize_size=args.resize_size)
+            next_stage0_semantic_state = (
+                extract_stage0_semantic_state(
+                    obs,
+                    env=env,
+                    context=context,
+                    task_description=str(task_description),
+                )
+                if args.trace_stage0_progress
+                else None
+            )
             if active_chunk_trace is not None:
                 active_chunk_trace["actions"].append(action)
                 active_chunk_trace["rewards"].append(float(reward))
@@ -1022,6 +1318,11 @@ def run_episode(
                 active_chunk_trace["truncations"].append(bool(truncated))
                 active_chunk_trace["success_once"].append(bool(terminated))
                 active_chunk_trace["next_obs_sequence"].append(next_policy_obs)
+                if next_stage0_semantic_state is not None:
+                    active_chunk_trace["stage0_semantic_state_sequence"].append(next_stage0_semantic_state)
+                    active_chunk_trace["stage0_progress_sequence"].append(
+                        next_stage0_semantic_state.get("progress")
+                    )
             if done:
                 success = bool(terminated)
                 flush_chunk_trace("terminated" if terminated else "truncated_horizon")
@@ -1036,6 +1337,10 @@ def run_episode(
 
     if error is None and active_chunk_trace is not None:
         flush_chunk_trace("episode_end")
+
+    if demo_trace_handle is not None and args.demo_trace_write_policy == "success_only" and success:
+        for demo_record in context_demo_chunk_traces:
+            write_jsonl_record(demo_trace_handle, demo_record)
 
     video_path = maybe_save_video(video_dir, task_description, task_id, episode_idx, success, replay_images)
     return {
@@ -1117,6 +1422,9 @@ def main() -> None:
     transition_trace_path = Path(args.transition_trace_path).resolve() if args.transition_trace_path else None
     if transition_trace_path is not None:
         transition_trace_path.parent.mkdir(parents=True, exist_ok=True)
+    demo_trace_path = Path(args.demo_trace_path).resolve() if args.demo_trace_path else None
+    if demo_trace_path is not None:
+        demo_trace_path.parent.mkdir(parents=True, exist_ok=True)
     provider_bundle_root = Path(args.provider_bundle_root).resolve() if args.provider_bundle_root else None
     if provider_bundle_root is not None:
         provider_bundle_root.mkdir(parents=True, exist_ok=True)
@@ -1127,12 +1435,18 @@ def main() -> None:
     dr_calibrator_model = (
         load_stagee_dr_calibrator_model(dr_calibrator_model_path) if dr_calibrator_model_path is not None else None
     )
+    lvd_selector_model_path = Path(args.lvd_selector_model_path).resolve() if args.lvd_selector_model_path else None
+    if args.selection_policy == "caver_lvd" and lvd_selector_model_path is None:
+        raise ValueError("--lvd-selector-model-path is required when --selection-policy=caver_lvd")
+    lvd_selector_model = (
+        load_lvd_selector_model(lvd_selector_model_path) if lvd_selector_model_path is not None else None
+    )
 
     eval_contexts, eval_plan = build_eval_contexts(args)
     selector_seed = args.selector_seed if args.selector_seed is not None else args.seed
     selection_rng = (
         np.random.default_rng(selector_seed)
-        if args.selection_policy in {"uniform", "caver_heuristic"}
+        if args.selection_policy in {"uniform", "caver_heuristic", "caver_k1_guarded", "caver_lvd"}
         else None
     )
     selector_history = make_selector_history()
@@ -1160,6 +1474,7 @@ def main() -> None:
     current_env_key: tuple[str, int] | None = None
     current_env: OffScreenRenderEnv | None = None
     transition_trace_handle: TextIO | None = None
+    demo_trace_handle: TextIO | None = None
     gesim_worker_client: GesimPersistentWorkerClient | None = None
 
     try:
@@ -1171,6 +1486,8 @@ def main() -> None:
             gesim_worker_client = GesimPersistentWorkerClient(provider_bundle_root=provider_bundle_root)
         if transition_trace_path is not None:
             transition_trace_handle = transition_trace_path.open("w", encoding="utf-8")
+        if demo_trace_path is not None:
+            demo_trace_handle = open_text_maybe_gzip(demo_trace_path, "wt")
 
         for context_position, context in enumerate(eval_contexts, start=1):
             if context.suite_name not in suite_cache:
@@ -1245,13 +1562,15 @@ def main() -> None:
                 context=context,
                 budget_record=budget_record,
                 transition_trace_handle=transition_trace_handle,
+                demo_trace_handle=demo_trace_handle,
                 selection_rng=selection_rng,
                 selector_seed=selector_seed,
                 selector_history=selector_history,
-                value_proxy_model=value_proxy_model,
-                dr_calibrator_model=dr_calibrator_model,
-                gesim_worker_client=gesim_worker_client,
-            )
+            value_proxy_model=value_proxy_model,
+            dr_calibrator_model=dr_calibrator_model,
+            lvd_selector_model=lvd_selector_model,
+            gesim_worker_client=gesim_worker_client,
+        )
             context_summaries.append(summary)
             total_episodes += 1
             total_successes += int(summary["success"])
@@ -1280,6 +1599,8 @@ def main() -> None:
             gesim_worker_client.close()
         if transition_trace_handle is not None:
             transition_trace_handle.close()
+        if demo_trace_handle is not None:
+            demo_trace_handle.close()
         if current_env is not None:
             current_env.close()
 
@@ -1333,6 +1654,10 @@ def main() -> None:
             "dr_calibrator_model_id": (
                 dr_calibrator_model.get("model_id") if dr_calibrator_model is not None else None
             ),
+            "lvd_selector_model_path": lvd_selector_model_path,
+            "lvd_selector_model_id": (
+                lvd_selector_model.get("model_id") if lvd_selector_model is not None else None
+            ),
             "num_steps_wait": args.num_steps_wait,
             "replan_steps": args.replan_steps,
             "resize_size": args.resize_size,
@@ -1345,6 +1670,12 @@ def main() -> None:
             "save_failures_only": args.save_failures_only,
             "context_log_path": context_log_path,
             "transition_trace_path": transition_trace_path,
+            "demo_trace_path": demo_trace_path,
+            "demo_trace_write_policy": args.demo_trace_write_policy,
+            "trace_policy_aux_mode": args.trace_policy_aux_mode,
+            "demo_trace_policy_aux_mode": args.demo_trace_policy_aux_mode,
+            "trace_next_obs_mode": args.trace_next_obs_mode,
+            "trace_observation_mode": args.trace_observation_mode,
         },
         "budget": budget_summary,
         "summary": {
@@ -1373,6 +1704,8 @@ def main() -> None:
 
     if transition_trace_path is not None:
         logging.info("wrote transition traces to %s", transition_trace_path)
+    if demo_trace_path is not None:
+        logging.info("wrote demo traces to %s", demo_trace_path)
 
     logging.info(
         "evaluation complete: successes=%s/%s success_rate=%.3f",

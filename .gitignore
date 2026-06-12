@@ -25,3 +25,13 @@ __pycache__/
 *.swo
 tools/uv
 tools/uvx
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz

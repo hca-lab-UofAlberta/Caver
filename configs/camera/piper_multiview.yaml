@@ -1,0 +1,49 @@
+status: scaffold_only
+base_frame: piper_base
+table_frame: calibrated_table
+notes:
+  - Fill real serial numbers, intrinsics, and extrinsics after camera bring-up.
+  - The proposal pins three fixed RGB views: head, hand_left, and hand_right.
+
+views:
+  head:
+    enabled: true
+    role: provider_summary
+    frame_id: camera_head_optical
+    rgb_topic: /camera/head/image_raw
+    resolution: [640, 480]
+    intrinsics:
+      fx: null
+      fy: null
+      cx: null
+      cy: null
+    distortion: [null, null, null, null, null]
+    extrinsics_base_to_camera: [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+
+  hand_left:
+    enabled: true
+    role: provider_condition_only
+    frame_id: camera_hand_left_optical
+    rgb_topic: /camera/hand_left/image_raw
+    resolution: [640, 480]
+    intrinsics:
+      fx: null
+      fy: null
+      cx: null
+      cy: null
+    distortion: [null, null, null, null, null]
+    extrinsics_base_to_camera: [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+
+  hand_right:
+    enabled: true
+    role: provider_condition_only
+    frame_id: camera_hand_right_optical
+    rgb_topic: /camera/hand_right/image_raw
+    resolution: [640, 480]
+    intrinsics:
+      fx: null
+      fy: null
+      cx: null
+      cy: null
+    distortion: [null, null, null, null, null]
+    extrinsics_base_to_camera: [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]

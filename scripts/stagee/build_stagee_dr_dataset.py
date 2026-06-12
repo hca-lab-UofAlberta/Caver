@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+from typing import Sequence
 
 _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
@@ -58,6 +59,30 @@ def resolve_lagged_nuisance_mean(metric: dict[str, Any]) -> float:
     return 0.0
 
 
+def is_number_sequence(value: Any) -> bool:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
+def resolve_base_feature_vector(
+    *,
+    logged_metric: dict[str, Any],
+    recomputed_metric: dict[str, Any],
+) -> tuple[list[float], str]:
+    logged_vector = logged_metric.get("base_feature_vector")
+    if is_number_sequence(logged_vector):
+        return [float(value) for value in logged_vector], "logged_metric_table"
+
+    base_feature_vector = [float(value) for value in recomputed_metric["base_feature_vector"]]
+    if (
+        recomputed_metric.get("base_feature_schema") == "caver_base_feature_v2_with_raw_novelty"
+        and "raw_novelty_proxy" in logged_metric
+        and base_feature_vector
+    ):
+        base_feature_vector[-1] = float(logged_metric["raw_novelty_proxy"])
+        return base_feature_vector, "recomputed_with_logged_novelty"
+    return base_feature_vector, "recomputed_no_history"
+
+
 def main() -> int:
     args = parse_args()
 
@@ -80,6 +105,7 @@ def main() -> int:
     partition_counts: collections.Counter[str] = collections.Counter()
     family_counts: collections.Counter[str] = collections.Counter()
     selector_mode_counts: collections.Counter[str] = collections.Counter()
+    feature_source_counts: collections.Counter[str] = collections.Counter()
     contexts_seen: set[str] = set()
     pseudo_min = float("inf")
     pseudo_max = float("-inf")
@@ -127,6 +153,10 @@ def main() -> int:
                 recomputed_metric = dict(recomputed_metrics[candidate_index])
                 logged_metric = dict(logged_metrics[candidate_index])
                 nuisance_mean = resolve_lagged_nuisance_mean(logged_metric)
+                base_feature_vector, base_feature_source = resolve_base_feature_vector(
+                    logged_metric=logged_metric,
+                    recomputed_metric=recomputed_metric,
+                )
                 candidate_selected = candidate_index == selected_candidate_index
                 importance_weight = (1.0 / propensity) if candidate_selected else 0.0
                 dr_pseudo_outcome = (
@@ -151,9 +181,20 @@ def main() -> int:
                     "lagged_nuisance_mean": nuisance_mean,
                     "dr_pseudo_outcome": float(dr_pseudo_outcome),
                     "dr_pseudo_outcome_clipped": float(dr_pseudo_outcome_clipped),
-                    "base_feature_vector": list(recomputed_metric["base_feature_vector"]),
-                    "raw_uncertainty_proxy": float(recomputed_metric["raw_uncertainty_proxy"]),
-                    "raw_diversity_proxy": float(recomputed_metric["raw_diversity_proxy"]),
+                    "base_feature_vector": base_feature_vector,
+                    "base_feature_source": base_feature_source,
+                    "base_feature_schema": str(
+                        logged_metric.get(
+                            "base_feature_schema",
+                            recomputed_metric.get("base_feature_schema", "legacy_caver_base_feature_v1"),
+                        )
+                    ),
+                    "raw_uncertainty_proxy": float(
+                        logged_metric.get("raw_uncertainty_proxy", recomputed_metric["raw_uncertainty_proxy"])
+                    ),
+                    "raw_diversity_proxy": float(
+                        logged_metric.get("raw_diversity_proxy", recomputed_metric["raw_diversity_proxy"])
+                    ),
                     "raw_novelty_proxy": float(logged_metric.get("raw_novelty_proxy", 0.0)),
                     "partition_name": context.get("partition_name"),
                     "proxy_family_id": context.get("proxy_family_id"),
@@ -164,6 +205,15 @@ def main() -> int:
                     "selection_policy": selector.get("selection_policy"),
                     "utility_source": logged_metric.get("value_proxy_source"),
                     "completed_reason": trace_record.get("completed_reason"),
+                    "used_for_policy_imitation": bool(
+                        trace_record.get("caver_policy_imitation_source")
+                        in {"verified_success", "verified_failed_segment_repair"}
+                    ),
+                    "used_for_calibration": True,
+                    "used_for_segment_repair": bool(
+                        trace_record.get("caver_policy_imitation_source") == "verified_failed_segment_repair"
+                        or trace_record.get("repair_policy") == "verified_progress_prefix_v1"
+                    ),
                 }
                 json.dump(record, handle, sort_keys=True, default=json_default)
                 handle.write("\n")
@@ -171,6 +221,7 @@ def main() -> int:
                 records_total += 1
                 selected_records += int(candidate_selected)
                 safe_candidate_counts[len(safe_candidate_indices)] += 1
+                feature_source_counts[base_feature_source] += 1
                 if context.get("partition_name") is not None:
                     partition_counts[str(context["partition_name"])] += 1
                 if context.get("proxy_family_id") is not None:
@@ -195,6 +246,7 @@ def main() -> int:
         "partition_counts": dict(partition_counts),
         "family_counts": dict(family_counts),
         "selector_mode_counts": dict(selector_mode_counts),
+        "feature_source_counts": dict(feature_source_counts),
         "dr_pseudo_outcome_min": float(pseudo_min),
         "dr_pseudo_outcome_max": float(pseudo_max),
     }

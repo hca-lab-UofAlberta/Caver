@@ -20,6 +20,15 @@ Training options:
   --policy-config NAME       OpenPI serve config name (default: pi05_libero)
   --base-model-path PATH     Base OpenPI PyTorch checkpoint dir
   --artifact-root PATH       Output root for heavy post-train artifacts
+  --training-log-root PATH   Optional root for RLinf training logs/checkpoints.
+                             Use node-local /tmp here to avoid shared-filesystem
+                             FSDP checkpoint fsync failures. Export/eval artifacts
+                             still stay under --artifact-root.
+  --keep-export-node-local   Keep the large exported PyTorch checkpoint under
+                             --training-log-root and evaluate it there. This
+                             avoids copying model.safetensors to shared storage.
+  --cleanup-training-log-dir Remove the RLinf training log directory after a
+                             successful checkpoint export.
   --task-suite NAME          Backend LIBERO suite name (default: libero_90)
   --task-ids IDS             Comma-separated backend task ids
   --train-max-steps COUNT    RLinf runner max_steps (default: 20)
@@ -63,6 +72,9 @@ config_name="libero_goal_ppo_openpi_pi05"
 policy_config="pi05_libero"
 base_model_path="/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch"
 artifact_root=""
+training_log_root=""
+keep_export_node_local=0
+cleanup_training_log_dir=0
 task_suite="libero_90"
 task_ids="6,7,11,16,17,46,47,48,57,58,59,63,73,74,75"
 train_max_steps="20"
@@ -102,6 +114,9 @@ while (($# > 0)); do
     --policy-config) policy_config="${2:?missing value for --policy-config}"; shift 2 ;;
     --base-model-path) base_model_path="${2:?missing value for --base-model-path}"; shift 2 ;;
     --artifact-root) artifact_root="${2:?missing value for --artifact-root}"; shift 2 ;;
+    --training-log-root) training_log_root="${2:?missing value for --training-log-root}"; shift 2 ;;
+    --keep-export-node-local) keep_export_node_local=1; shift ;;
+    --cleanup-training-log-dir) cleanup_training_log_dir=1; shift ;;
     --task-suite) task_suite="${2:?missing value for --task-suite}"; shift 2 ;;
     --task-ids) task_ids="${2:?missing value for --task-ids}"; shift 2 ;;
     --train-max-steps) train_max_steps="${2:?missing value for --train-max-steps}"; shift 2 ;;
@@ -177,17 +192,41 @@ case "${method}" in
     demo_manifest="${round_results_dir}/real_only_round_demo.manifest.json"
     round_summary_source="${round_results_dir}/real_only_round_summary.json"
     default_exact_trace_path="${round_results_dir}/real_only_online_chunks.jsonl"
+    admission_summary_source=""
     ;;
   caver)
     demo_manifest="${round_results_dir}/caver_round_demo.manifest.json"
     round_summary_source="${round_results_dir}/caver_round_summary.json"
-    default_exact_trace_path="${round_results_dir}/caver_admitted_chunks.jsonl"
+    if [ -f "${round_results_dir}/caver_admitted_chunks.jsonl.gz" ]; then
+      default_exact_trace_path="${round_results_dir}/caver_admitted_chunks.jsonl.gz"
+    else
+      default_exact_trace_path="${round_results_dir}/caver_admitted_chunks.jsonl"
+    fi
+    admission_summary_source="${round_results_dir}/caver_admission_summary.json"
     ;;
   *)
     echo "error: unsupported method ${method}" >&2
     exit 1
     ;;
 esac
+
+no_admitted_update=0
+if [ "${method}" = "caver" ] && [ -f "${admission_summary_source}" ]; then
+  no_admitted_update="$(
+    python3 - "${admission_summary_source}" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1]).resolve()
+with path.open("r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+contexts_admitted = int(payload.get("contexts_admitted", 0))
+admitted_trace_records = int(payload.get("admitted_trace_records", 0))
+print(1 if contexts_admitted <= 0 or admitted_trace_records <= 0 else 0)
+PY
+  )"
+fi
 
 if [ "${train_backend}" = "sac_demo" ] && [ ! -f "${demo_manifest}" ]; then
   echo "error: expected demo manifest missing: ${demo_manifest}" >&2
@@ -202,13 +241,16 @@ if [ "${train_backend}" = "exact_offline_nft" ]; then
     echo "error: exact trace path not found: ${exact_trace_path}" >&2
     exit 1
   fi
-  python3 - "${exact_trace_path}" <<'PY'
+  if (( no_admitted_update == 0 )); then
+    python3 - "${exact_trace_path}" <<'PY'
+import gzip
 import json
 import pathlib
 import sys
 
 trace_path = pathlib.Path(sys.argv[1]).resolve()
-with trace_path.open("r", encoding="utf-8") as handle:
+open_fn = gzip.open if trace_path.suffix == ".gz" else open
+with open_fn(trace_path, "rt", encoding="utf-8") as handle:
     for line_number, line in enumerate(handle, start=1):
         line = line.strip()
         if not line:
@@ -229,6 +271,7 @@ with trace_path.open("r", encoding="utf-8") as handle:
             )
         break
 PY
+  fi
   if [ "${config_name}" = "libero_goal_ppo_openpi_pi05" ]; then
     config_name="libero_goal_nft_actor_openpi_pi05"
   fi
@@ -238,13 +281,38 @@ experiment_name="stage0_posttrain_${method}"
 round_run_dir="$(dirname -- "${round_results_dir}")"
 round_run_name="$(basename -- "${round_run_dir}")"
 if [ -z "${artifact_root}" ]; then
-  artifact_root="${CAVER_DEFAULT_RDSS_ROOT}/caver/stagee_posttrain/${round_run_name}"
+  if [ "${train_backend}" = "exact_offline_nft" ]; then
+    artifact_root="${CAVER_DEFAULT_PROJECT_ROOT}/caver/stagee_posttrain/${round_run_name}"
+  else
+    artifact_root="${CAVER_DEFAULT_RDSS_ROOT}/caver/stagee_posttrain/${round_run_name}"
+  fi
 else
   artifact_root="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${artifact_root}")"
 fi
 ensure_directory "${artifact_root}"
-training_log_dir="${artifact_root}/posttrain_train"
+if [ -n "${training_log_root}" ]; then
+  training_log_root="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${training_log_root}")"
+  ensure_directory "${training_log_root}"
+  training_log_dir="${training_log_root}/posttrain_train"
+else
+  training_log_dir="${artifact_root}/posttrain_train"
+fi
 export_dir="${artifact_root}/posttrain_checkpoint"
+eval_pretrained_path="${export_dir}"
+if (( no_admitted_update )); then
+  eval_pretrained_path="${base_model_path}"
+fi
+export_work_dir="${export_dir}"
+if [ -n "${training_log_root}" ]; then
+  export_work_dir="${training_log_root}/posttrain_checkpoint_export"
+fi
+if (( keep_export_node_local )) && [ -z "${training_log_root}" ]; then
+  echo "error: --keep-export-node-local requires --training-log-root" >&2
+  exit 1
+fi
+if (( keep_export_node_local )) && (( no_admitted_update == 0 )); then
+  eval_pretrained_path="${export_work_dir}"
+fi
 export_summary_path="${artifact_root}/posttrain_checkpoint_export.summary.json"
 exact_rollout_batch_path="${artifact_root}/posttrain_exact_rollout_batch.pt"
 exact_rollout_batch_summary_path="${artifact_root}/posttrain_exact_rollout_batch.summary.json"
@@ -266,6 +334,10 @@ if [ "${train_backend}" = "exact_offline_nft" ]; then
       exit 1
     fi
     exact_rollout_batch_path="${train_data_path}"
+    exact_rollout_batch_summary_candidate="${exact_rollout_batch_path%.pt}.summary.json"
+    if [ -f "${exact_rollout_batch_summary_candidate}" ]; then
+      exact_rollout_batch_summary_path="${exact_rollout_batch_summary_candidate}"
+    fi
   else
     train_data_path="${exact_rollout_batch_path}"
   fi
@@ -341,9 +413,30 @@ export_cmd=(
   "${CAVER_REPO_ROOT}/scripts/openpi/export_rlinf_actor_checkpoint_to_pytorch.sh"
   --actor-checkpoint-dir "__ACTOR_CHECKPOINT_DIR__"
   --base-model-path "${base_model_path}"
-  --output-path "${export_dir}"
+  --output-path "${export_work_dir}"
   --summary-path "${export_summary_path}"
 )
+
+validate_safetensors_checkpoint() {
+  local checkpoint_dir="$1"
+  "${CAVER_REPO_ROOT}/scripts/env/with_openpi_pistepnft_libero_train.sh" -- \
+    python - "${checkpoint_dir}" <<'PY'
+import pathlib
+import sys
+
+from safetensors import safe_open
+
+checkpoint_dir = pathlib.Path(sys.argv[1]).resolve()
+weight_path = checkpoint_dir / "model.safetensors"
+if not weight_path.is_file():
+    raise SystemExit(f"missing model.safetensors: {weight_path}")
+with safe_open(str(weight_path), framework="pt", device="cpu") as handle:
+    keys = list(handle.keys())
+if not keys:
+    raise SystemExit(f"empty safetensors checkpoint: {weight_path}")
+print(f"validated safetensors checkpoint: {weight_path} keys={len(keys)}")
+PY
+}
 
 make_eval_cmd() {
   local partition_name="$1"
@@ -353,7 +446,7 @@ make_eval_cmd() {
     "${CAVER_REPO_ROOT}/scripts/bridge/run_libero_remote_eval.sh"
     --openpi-native
     --config-name "${policy_config}"
-    --pretrained-path "${export_dir}"
+    --pretrained-path "${eval_pretrained_path}"
     --
     --manifest-path "${manifest_path}"
     --partition-name "${partition_name}"
@@ -408,7 +501,12 @@ if [ "${train_backend}" = "exact_offline_nft" ]; then
   printf '  exact_rollout_batch_path: %s\n' "${exact_rollout_batch_path}"
 fi
 printf '  training_log_dir: %s\n' "${training_log_dir}"
+printf '  training_log_root: %s\n' "${training_log_root:-<artifact-root>}"
+printf '  cleanup_training_log_dir: %s\n' "${cleanup_training_log_dir}"
+printf '  keep_export_node_local: %s\n' "${keep_export_node_local}"
 printf '  export_dir: %s\n' "${export_dir}"
+printf '  export_work_dir: %s\n' "${export_work_dir}"
+printf '  eval_pretrained_path: %s\n' "${eval_pretrained_path}"
 printf '  posttrain_summary: %s\n' "${posttrain_summary_path}"
 
 if ((dry_run)); then
@@ -416,8 +514,11 @@ if ((dry_run)); then
 fi
 
 export MUJOCO_GL="${libero_gl_backend}"
+latest_actor_checkpoint=""
 
-if ((skip_train == 0)); then
+if (( no_admitted_update )); then
+  printf 'no admitted CAVER contexts; skipping backend train/export and evaluating base model: %s\n' "${base_model_path}"
+elif ((skip_train == 0)); then
   if [ -d "${training_log_dir}" ]; then
     rm -rf -- "${training_log_dir}"
   fi
@@ -431,9 +532,10 @@ elif [ "${train_backend}" = "exact_offline_nft" ] && [ ! -f "${exact_rollout_bat
   exit 1
 fi
 
-checkpoint_root="${training_log_dir}/${experiment_name}/checkpoints"
-latest_actor_checkpoint="$(
-  python3 - "${checkpoint_root}" <<'PY'
+if (( no_admitted_update == 0 )); then
+  checkpoint_root="${training_log_dir}/${experiment_name}/checkpoints"
+  latest_actor_checkpoint="$(
+    python3 - "${checkpoint_root}" <<'PY'
 import pathlib
 import re
 import sys
@@ -453,16 +555,32 @@ if not paths:
 paths.sort()
 print(paths[-1][1])
 PY
-)"
-if [ -z "${latest_actor_checkpoint}" ]; then
-  echo "error: no RLinf actor checkpoint found under ${checkpoint_root}" >&2
-  exit 1
-fi
+  )"
+  if [ -z "${latest_actor_checkpoint}" ]; then
+    echo "error: no RLinf actor checkpoint found under ${checkpoint_root}" >&2
+    exit 1
+  fi
 
-if ((skip_export == 0)); then
-  rm -rf -- "${export_dir}"
-  export_cmd_resolved=("${export_cmd[@]/__ACTOR_CHECKPOINT_DIR__/${latest_actor_checkpoint}}")
-  "${export_cmd_resolved[@]}"
+  if ((skip_export == 0)); then
+    rm -rf -- "${export_work_dir}"
+    if [ "${export_work_dir}" != "${export_dir}" ]; then
+      rm -rf -- "${export_dir}"
+    fi
+    export_cmd_resolved=("${export_cmd[@]/__ACTOR_CHECKPOINT_DIR__/${latest_actor_checkpoint}}")
+    "${export_cmd_resolved[@]}"
+    validate_safetensors_checkpoint "${export_work_dir}"
+    if [ "${export_work_dir}" != "${export_dir}" ] && (( keep_export_node_local == 0 )); then
+      mkdir -p -- "$(dirname -- "${export_dir}")"
+      cp -a -- "${export_work_dir}" "${export_dir}"
+      validate_safetensors_checkpoint "${export_dir}"
+      if (( cleanup_training_log_dir )); then
+        rm -rf -- "${export_work_dir}"
+      fi
+    fi
+    if (( cleanup_training_log_dir )) && [ -n "${training_log_root}" ] && [ -d "${training_log_dir}" ]; then
+      rm -rf -- "${training_log_dir}"
+    fi
+  fi
 fi
 
 if ((skip_eval == 0)); then
@@ -470,7 +588,7 @@ if ((skip_eval == 0)); then
     "${CAVER_REPO_ROOT}/scripts/bridge/run_libero_remote_eval.sh"
     --openpi-native
     --config-name "${policy_config}"
-    --pretrained-path "${export_dir}"
+    --pretrained-path "${eval_pretrained_path}"
     --
     --manifest-path "${manifest_path}"
     --partition-name "${val_partition}"
@@ -488,7 +606,7 @@ if ((skip_eval == 0)); then
     "${CAVER_REPO_ROOT}/scripts/bridge/run_libero_remote_eval.sh"
     --openpi-native
     --config-name "${policy_config}"
-    --pretrained-path "${export_dir}"
+    --pretrained-path "${eval_pretrained_path}"
     --
     --manifest-path "${manifest_path}"
     --partition-name "${test_partition}"
@@ -531,11 +649,13 @@ python3 - \
   "${training_log_dir}" \
   "${latest_actor_checkpoint}" \
   "${export_dir}" \
+  "${eval_pretrained_path}" \
   "${export_summary_path}" \
   "${exact_trace_path}" \
   "${exact_rollout_batch_summary_path}" \
   "${val_results_path}" \
   "${test_results_path}" \
+  "${no_admitted_update}" \
   "${posttrain_summary_path}" <<'PY'
 import json
 import pathlib
@@ -549,19 +669,26 @@ import sys
     training_log_dir,
     latest_actor_checkpoint,
     export_dir,
+    eval_pretrained_path,
     export_summary_path,
     exact_trace_path,
     exact_rollout_batch_summary_path,
     val_results_path,
     test_results_path,
+    no_admitted_update,
     posttrain_summary_path,
 ) = sys.argv[1:]
 
 round_summary_source = pathlib.Path(round_summary_source).resolve()
 train_data_path = pathlib.Path(train_data_path).resolve()
 training_log_dir = pathlib.Path(training_log_dir).resolve()
-latest_actor_checkpoint = pathlib.Path(latest_actor_checkpoint).resolve()
+latest_actor_checkpoint = (
+    pathlib.Path(latest_actor_checkpoint).resolve()
+    if latest_actor_checkpoint
+    else None
+)
 export_dir = pathlib.Path(export_dir).resolve()
+eval_pretrained_path = pathlib.Path(eval_pretrained_path).resolve()
 export_summary_path = pathlib.Path(export_summary_path).resolve()
 exact_trace_path = pathlib.Path(exact_trace_path).resolve() if exact_trace_path else None
 exact_rollout_batch_summary_path = (
@@ -571,6 +698,7 @@ exact_rollout_batch_summary_path = (
 )
 val_results_path = pathlib.Path(val_results_path).resolve()
 test_results_path = pathlib.Path(test_results_path).resolve()
+no_admitted_update = bool(int(no_admitted_update))
 posttrain_summary_path = pathlib.Path(posttrain_summary_path).resolve()
 
 def load_json_if_exists(path: pathlib.Path):
@@ -592,9 +720,11 @@ summary = {
     "round_summary_source": str(round_summary_source),
     "train_data_path": str(train_data_path),
     "training_log_dir": str(training_log_dir),
-    "latest_actor_checkpoint": str(latest_actor_checkpoint),
+    "latest_actor_checkpoint": str(latest_actor_checkpoint) if latest_actor_checkpoint is not None else None,
     "export_dir": str(export_dir),
+    "eval_pretrained_path": str(eval_pretrained_path),
     "export_summary_path": str(export_summary_path),
+    "training_skipped_no_admitted": no_admitted_update,
     "base_round_online": (round_summary or {}).get("online"),
     "heldout": {},
 }

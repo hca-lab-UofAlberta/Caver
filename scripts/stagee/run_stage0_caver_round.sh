@@ -47,16 +47,46 @@ Online execution options:
 CAVER scaffold options:
   --selector-mode NAME       Selector implementation label (default: frozen_actionspace_softmax_v1)
   --admission-policy NAME    Admission policy label (default: success_lcb_v1)
+  --admission-kappa VALUE
+                             Optional kappa override for LCB-style admission policies
+  --admission-threshold VALUE
+                             Optional acceptance-threshold override for LCB-style admission policies
+  --top-m-success-count COUNT
+                             For caver_top_m_success, admit top M successes by executed LCB
+  --family-min-success-count COUNT
+                             For caver_family_balanced_success, admit this many successes per family
+  --rescue-family-ids IDS    For caver_hard_family_rescue, eligible proxy families
+  --rescue-per-family-count COUNT
+                             For caver_hard_family_rescue, failed near misses per rescued family
+  --repair-min-trace-records COUNT
+                             For caver_family_segment_repair, minimum repaired prefix chunks
+  --repair-max-trace-records COUNT
+                             For caver_family_segment_repair, maximum repaired prefix chunks
+  --repair-min-progress VALUE
+                             Minimum verified progress gain for repaired failed prefixes
+  --repair-min-primitive-steps COUNT
+                             Minimum primitive steps before a failed prefix can be repaired
+  --repair-max-regression VALUE
+                             Maximum pre-endpoint progress regression for repaired prefixes
   --value-proxy-model-path PATH
                              Optional fitted Stage-0 value-proxy JSON for the selector
   --dr-calibrator-model-path PATH
                              Optional lagged Stage-E DR calibrator JSON for the selector
+  --lvd-selector-model-path PATH
+                             Optional CAVER-LVD selector JSON for selection-policy=caver_lvd
   --provider-mode NAME
                              Optional provider mode: none, gesim_bundle, gesim_live_summary
   --provider-bundle-root PATH
                              Optional provider bundle / inference root
   --provider-gesim-timeout-sec COUNT
   --provider-gesim-prompt TEXT
+  --demo-trace-write-policy NAME
+                             Full demo trace write policy: all or success_only
+  --trace-policy-aux-mode NAME
+                             Policy auxiliary trace mode: none, summary, or full
+  --trace-next-obs-mode NAME
+                             Next-observation trace mode: last or all
+  --trace-stage0-progress    Log compact LIBERO semantic progress for verified segment repair
   --no-require-candidate-bank
                              Allow pre-v2 traces that omit the full candidate bank
 
@@ -80,11 +110,16 @@ Backend update options:
 Artifact options:
   --results-dir PATH
   --demo-output-mode NAME
+  --demo-trace-path PATH
   --max-items-per-shard COUNT
   --demo-format NAME
   --skip-backend-train
                              Build online/selector/DR artifacts only; skip demo conversion and backend training
+  --skip-backend-update
+                             Build admitted-demo artifacts but skip backend training
   --skip-online
+  --skip-dr-calibrator-fit
+                             Skip fitting the next-round DR calibrator
   --dry-run
   -h, --help
 EOF
@@ -124,12 +159,28 @@ exact_infer_mode="train"
 
 selector_mode="frozen_actionspace_softmax_v1"
 admission_policy="success_lcb_v1"
+admission_kappa=""
+admission_threshold=""
+top_m_success_count=""
+family_min_success_count=""
+rescue_family_ids=""
+rescue_per_family_count=""
+repair_min_trace_records=""
+repair_max_trace_records=""
+repair_min_progress=""
+repair_min_primitive_steps=""
+repair_max_regression=""
 value_proxy_model_path=""
 dr_calibrator_model_path=""
+lvd_selector_model_path=""
 provider_mode="none"
 provider_bundle_root=""
 provider_gesim_timeout_sec="900"
 provider_gesim_prompt="best quality, consistent and smooth motion, realistic, clear and distinct."
+demo_trace_write_policy="success_only"
+trace_policy_aux_mode="summary"
+trace_next_obs_mode=""
+trace_stage0_progress=0
 require_candidate_bank=1
 
 config_name="libero_goal_ppo_openpi_pi05"
@@ -149,11 +200,14 @@ min_buffer_size="1"
 train_actor_steps="1"
 
 results_dir=""
+demo_trace_path_override=""
 demo_output_mode="sharded_manifest"
 max_items_per_shard="128"
 demo_format="chunk_step"
 skip_backend_train=0
+skip_backend_update=0
 skip_online=0
+skip_dr_calibrator_fit=0
 dry_run=0
 
 while (($# > 0)); do
@@ -294,12 +348,60 @@ while (($# > 0)); do
       admission_policy="${2:?missing value for --admission-policy}"
       shift 2
       ;;
+    --admission-kappa)
+      admission_kappa="${2:?missing value for --admission-kappa}"
+      shift 2
+      ;;
+    --admission-threshold)
+      admission_threshold="${2:?missing value for --admission-threshold}"
+      shift 2
+      ;;
+    --top-m-success-count)
+      top_m_success_count="${2:?missing value for --top-m-success-count}"
+      shift 2
+      ;;
+    --family-min-success-count)
+      family_min_success_count="${2:?missing value for --family-min-success-count}"
+      shift 2
+      ;;
+    --rescue-family-ids)
+      rescue_family_ids="${2:?missing value for --rescue-family-ids}"
+      shift 2
+      ;;
+    --rescue-per-family-count)
+      rescue_per_family_count="${2:?missing value for --rescue-per-family-count}"
+      shift 2
+      ;;
+    --repair-min-trace-records)
+      repair_min_trace_records="${2:?missing value for --repair-min-trace-records}"
+      shift 2
+      ;;
+    --repair-max-trace-records)
+      repair_max_trace_records="${2:?missing value for --repair-max-trace-records}"
+      shift 2
+      ;;
+    --repair-min-progress)
+      repair_min_progress="${2:?missing value for --repair-min-progress}"
+      shift 2
+      ;;
+    --repair-min-primitive-steps)
+      repair_min_primitive_steps="${2:?missing value for --repair-min-primitive-steps}"
+      shift 2
+      ;;
+    --repair-max-regression)
+      repair_max_regression="${2:?missing value for --repair-max-regression}"
+      shift 2
+      ;;
     --value-proxy-model-path)
       value_proxy_model_path="${2:?missing value for --value-proxy-model-path}"
       shift 2
       ;;
     --dr-calibrator-model-path)
       dr_calibrator_model_path="${2:?missing value for --dr-calibrator-model-path}"
+      shift 2
+      ;;
+    --lvd-selector-model-path)
+      lvd_selector_model_path="${2:?missing value for --lvd-selector-model-path}"
       shift 2
       ;;
     --provider-mode)
@@ -317,6 +419,22 @@ while (($# > 0)); do
     --provider-gesim-prompt)
       provider_gesim_prompt="${2:?missing value for --provider-gesim-prompt}"
       shift 2
+      ;;
+    --demo-trace-write-policy)
+      demo_trace_write_policy="${2:?missing value for --demo-trace-write-policy}"
+      shift 2
+      ;;
+    --trace-policy-aux-mode)
+      trace_policy_aux_mode="${2:?missing value for --trace-policy-aux-mode}"
+      shift 2
+      ;;
+    --trace-next-obs-mode)
+      trace_next_obs_mode="${2:?missing value for --trace-next-obs-mode}"
+      shift 2
+      ;;
+    --trace-stage0-progress)
+      trace_stage0_progress=1
+      shift
       ;;
     --no-require-candidate-bank)
       require_candidate_bank=0
@@ -390,6 +508,10 @@ while (($# > 0)); do
       demo_output_mode="${2:?missing value for --demo-output-mode}"
       shift 2
       ;;
+    --demo-trace-path)
+      demo_trace_path_override="${2:?missing value for --demo-trace-path}"
+      shift 2
+      ;;
     --max-items-per-shard)
       max_items_per_shard="${2:?missing value for --max-items-per-shard}"
       shift 2
@@ -402,8 +524,16 @@ while (($# > 0)); do
       skip_backend_train=1
       shift
       ;;
+    --skip-backend-update)
+      skip_backend_update=1
+      shift
+      ;;
     --skip-online)
       skip_online=1
+      shift
+      ;;
+    --skip-dr-calibrator-fit)
+      skip_dr_calibrator_fit=1
       shift
       ;;
     --dry-run)
@@ -434,7 +564,7 @@ case "${server_mode}" in
 esac
 
 case "${selection_policy}" in
-  first|uniform|caver_heuristic)
+  first|uniform|caver_heuristic|caver_k1_guarded|caver_lvd)
     ;;
   *)
     echo "error: unsupported --selection-policy ${selection_policy}" >&2
@@ -459,6 +589,19 @@ case "${demo_output_mode}" in
     exit 1
     ;;
 esac
+
+case "${demo_trace_write_policy}" in
+  all|success_only)
+    ;;
+  *)
+    echo "error: unsupported --demo-trace-write-policy ${demo_trace_write_policy}" >&2
+    exit 1
+    ;;
+esac
+if [ "${admission_policy}" = "all_executed_nonerror" ] && [ "${demo_trace_write_policy}" = "success_only" ]; then
+  printf 'warning: --admission-policy all_executed_nonerror requires all executed traces; overriding --demo-trace-write-policy success_only -> all\n' >&2
+  demo_trace_write_policy="all"
+fi
 
 case "${libero_gl_backend}" in
   egl|osmesa)
@@ -505,6 +648,18 @@ if [ -n "${dr_calibrator_model_path}" ]; then
   fi
 fi
 
+if [ -n "${lvd_selector_model_path}" ]; then
+  lvd_selector_model_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${lvd_selector_model_path}")"
+  if [ ! -f "${lvd_selector_model_path}" ]; then
+    echo "error: LVD selector model not found: ${lvd_selector_model_path}" >&2
+    exit 1
+  fi
+fi
+if [ "${selection_policy}" = "caver_lvd" ] && [ -z "${lvd_selector_model_path}" ]; then
+  echo "error: --lvd-selector-model-path is required for --selection-policy caver_lvd" >&2
+  exit 1
+fi
+
 model_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${model_path}")"
 selector_seed_effective="${selector_seed:-${seed}}"
 backend_task_suite="${backend_task_suite:-${task_suite}}"
@@ -522,6 +677,16 @@ fi
 exact_rlinf_config_name_effective="${exact_rlinf_config_name:-${config_name}}"
 if { [ "${server_mode}" = "openpi-exact" ] || ((exact_rollout_payload)); } && [ -z "${exact_action_chunk}" ]; then
   exact_action_chunk="${replan_steps}"
+fi
+if [ -z "${trace_next_obs_mode}" ]; then
+  if [ "${demo_format}" = "primitive_step" ]; then
+    trace_next_obs_mode="all"
+  else
+    trace_next_obs_mode="last"
+  fi
+fi
+if [ "${admission_policy}" = "caver_family_segment_repair" ]; then
+  trace_stage0_progress=1
 fi
 
 if [ -z "${results_dir}" ]; then
@@ -560,11 +725,33 @@ fi
 online_results_path="${results_dir}/caver_online_eval.json"
 online_context_log_path="${results_dir}/caver_online_contexts.jsonl"
 trace_path="${results_dir}/caver_online_chunks.jsonl"
+demo_trace_path="${demo_trace_path_override:-${results_dir}/caver_online_demo_chunks.jsonl.gz}"
 selector_context_path="${results_dir}/caver_selector_contexts.jsonl"
 selector_summary_path="${results_dir}/caver_selector_summary.json"
 admission_context_path="${results_dir}/caver_admission_contexts.jsonl"
 admission_summary_path="${results_dir}/caver_admission_summary.json"
-admitted_trace_path="${results_dir}/caver_admitted_chunks.jsonl"
+admitted_trace_path="${results_dir}/caver_admitted_chunks.jsonl.gz"
+demo_trace_write_path="${demo_trace_path}"
+admitted_trace_write_path="${admitted_trace_path}"
+heavy_trace_root="${CAVER_STAGEE_HEAVY_TRACE_ROOT:-}"
+if [ -n "${heavy_trace_root}" ] && [ -z "${demo_trace_path_override}" ]; then
+  heavy_trace_id="$(
+    python3 - "${results_dir}" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1]).resolve()
+print(f"{path.parent.parent.name}__{path.parent.name}__{path.name}__{hashlib.sha1(str(path).encode()).hexdigest()[:10]}")
+PY
+  )"
+  heavy_trace_dir="${heavy_trace_root}/${heavy_trace_id}"
+  ensure_directory "${heavy_trace_dir}"
+  demo_trace_path="${results_dir}/caver_online_demo_chunks.jsonl"
+  demo_trace_write_path="${heavy_trace_dir}/caver_online_demo_chunks.jsonl.gz"
+  admitted_trace_path="${results_dir}/caver_admitted_chunks.jsonl"
+  admitted_trace_write_path="${heavy_trace_dir}/caver_admitted_chunks.jsonl.gz"
+fi
 dr_dataset_path="${results_dir}/caver_dr_candidate_dataset.jsonl"
 dr_summary_path="${results_dir}/caver_dr_candidate_dataset.summary.json"
 next_dr_calibrator_path="${results_dir}/caver_lagged_dr_calibrator.json"
@@ -625,13 +812,25 @@ online_cmd+=(
   --results-path "${online_results_path}"
   --context-log-path "${online_context_log_path}"
   --transition-trace-path "${trace_path}"
+  --demo-trace-path "${demo_trace_write_path}"
+  --demo-trace-write-policy "${demo_trace_write_policy}"
+  --trace-policy-aux-mode "${trace_policy_aux_mode}"
+  --demo-trace-policy-aux-mode "full"
+  --trace-next-obs-mode "${trace_next_obs_mode}"
+  --trace-observation-mode "none"
 )
+if ((trace_stage0_progress)); then
+  online_cmd+=(--trace-stage0-progress)
+fi
 
 if [ -n "${value_proxy_model_path}" ]; then
   online_cmd+=(--value-proxy-model-path "${value_proxy_model_path}")
 fi
 if [ -n "${dr_calibrator_model_path}" ]; then
   online_cmd+=(--dr-calibrator-model-path "${dr_calibrator_model_path}")
+fi
+if [ -n "${lvd_selector_model_path}" ]; then
+  online_cmd+=(--lvd-selector-model-path "${lvd_selector_model_path}")
 fi
 if [ "${provider_mode}" != "none" ]; then
   online_cmd+=(
@@ -674,14 +873,54 @@ artifact_cmd=(
   "${CAVER_REPO_ROOT}/scripts/stagee/build_caver_round_artifacts.py"
   --online-results "${online_results_path}"
   --trace-path "${trace_path}"
+  --demo-trace-path "${demo_trace_path}"
   --selector-context-path "${selector_context_path}"
   --selector-summary-path "${selector_summary_path}"
   --admission-context-path "${admission_context_path}"
   --admission-summary-path "${admission_summary_path}"
-  --admitted-trace-path "${admitted_trace_path}"
+  --admitted-trace-path "${admitted_trace_write_path}"
   --selector-mode "${selector_mode}"
   --admission-policy "${admission_policy}"
 )
+if [ -n "${value_proxy_model_path}" ]; then
+  artifact_cmd+=(--value-proxy-model-path "${value_proxy_model_path}")
+fi
+if [ -n "${dr_calibrator_model_path}" ]; then
+  artifact_cmd+=(--dr-calibrator-model-path "${dr_calibrator_model_path}")
+fi
+if [ -n "${admission_kappa}" ]; then
+  artifact_cmd+=(--admission-kappa "${admission_kappa}")
+fi
+if [ -n "${admission_threshold}" ]; then
+  artifact_cmd+=(--admission-threshold "${admission_threshold}")
+fi
+if [ -n "${top_m_success_count}" ]; then
+  artifact_cmd+=(--top-m-success-count "${top_m_success_count}")
+fi
+if [ -n "${family_min_success_count}" ]; then
+  artifact_cmd+=(--family-min-success-count "${family_min_success_count}")
+fi
+if [ -n "${rescue_family_ids}" ]; then
+  artifact_cmd+=(--rescue-family-ids "${rescue_family_ids}")
+fi
+if [ -n "${rescue_per_family_count}" ]; then
+  artifact_cmd+=(--rescue-per-family-count "${rescue_per_family_count}")
+fi
+if [ -n "${repair_min_trace_records}" ]; then
+  artifact_cmd+=(--repair-min-trace-records "${repair_min_trace_records}")
+fi
+if [ -n "${repair_max_trace_records}" ]; then
+  artifact_cmd+=(--repair-max-trace-records "${repair_max_trace_records}")
+fi
+if [ -n "${repair_min_progress}" ]; then
+  artifact_cmd+=(--repair-min-progress "${repair_min_progress}")
+fi
+if [ -n "${repair_min_primitive_steps}" ]; then
+  artifact_cmd+=(--repair-min-primitive-steps "${repair_min_primitive_steps}")
+fi
+if [ -n "${repair_max_regression}" ]; then
+  artifact_cmd+=(--repair-max-regression "${repair_max_regression}")
+fi
 if ((require_candidate_bank)); then
   artifact_cmd+=(--require-candidate-bank)
 fi
@@ -766,20 +1005,32 @@ if [ "${server_mode}" = "openpi-exact" ] || ((exact_rollout_payload)); then
   printf '  exact_solver_type: %s\n' "${exact_solver_type}"
   printf '  exact_infer_mode: %s\n' "${exact_infer_mode}"
 fi
+printf '  trace_policy_aux_mode: %s\n' "${trace_policy_aux_mode}"
+printf '  demo_trace_write_policy: %s\n' "${demo_trace_write_policy}"
+printf '  trace_next_obs_mode: %s\n' "${trace_next_obs_mode}"
+printf '  trace_stage0_progress: %s\n' "${trace_stage0_progress}"
 printf 'artifacts:\n'
 printf '  results_dir: %s\n' "${results_dir}"
 printf '  online_results: %s\n' "${online_results_path}"
 printf '  online_context_log: %s\n' "${online_context_log_path}"
 printf '  trace_path: %s\n' "${trace_path}"
+printf '  demo_trace_path: %s\n' "${demo_trace_path}"
+if [ "${demo_trace_write_path}" != "${demo_trace_path}" ]; then
+  printf '  demo_trace_write_path: %s\n' "${demo_trace_write_path}"
+fi
 printf '  selector_summary: %s\n' "${selector_summary_path}"
 printf '  admission_summary: %s\n' "${admission_summary_path}"
 printf '  admitted_trace: %s\n' "${admitted_trace_path}"
+if [ "${admitted_trace_write_path}" != "${admitted_trace_path}" ]; then
+  printf '  admitted_trace_write_path: %s\n' "${admitted_trace_write_path}"
+fi
 printf '  demo_output: %s\n' "${demo_output_path}"
 printf '  demo_summary: %s\n' "${demo_summary_path}"
 printf '  training_log_dir: %s\n' "${training_log_dir}"
 printf '  round_summary: %s\n' "${round_summary_path}"
 printf '  value_proxy_model_path: %s\n' "${value_proxy_model_path:-none}"
 printf '  dr_calibrator_model_path: %s\n' "${dr_calibrator_model_path:-none}"
+printf '  lvd_selector_model_path: %s\n' "${lvd_selector_model_path:-none}"
 printf '  provider_mode: %s\n' "${provider_mode}"
 printf '  provider_bundle_root: %s\n' "${provider_bundle_root:-none}"
 if [ "${provider_mode}" != "none" ]; then
@@ -802,13 +1053,34 @@ fi
 printf '  skip_online: %s\n' "${skip_online_label}"
 printf '  skip_backend_train: %s\n' "${skip_backend_train_label}"
 
+write_trace_source_manifest() {
+  local manifest_path="$1"
+  local source_path="$2"
+  python3 - "${manifest_path}" "${source_path}" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest_path = pathlib.Path(sys.argv[1]).resolve()
+source_path = pathlib.Path(sys.argv[2]).resolve()
+payload = {
+    "trace_input_format": "stagee_trace_source_manifest_v1",
+    "sources": [{"path": str(source_path)}],
+}
+manifest_path.parent.mkdir(parents=True, exist_ok=True)
+with manifest_path.open("w", encoding="utf-8") as handle:
+    json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+    handle.write("\n")
+PY
+}
+
 if ((dry_run)); then
   exit 0
 fi
 
 export MUJOCO_GL="${libero_gl_backend}"
 if ((skip_online)); then
-  for required_path in "${online_results_path}" "${online_context_log_path}" "${trace_path}"; do
+  for required_path in "${online_results_path}" "${online_context_log_path}" "${trace_path}" "${demo_trace_path}"; do
     if [ ! -f "${required_path}" ]; then
       echo "error: --skip-online requires existing artifact: ${required_path}" >&2
       exit 1
@@ -816,6 +1088,9 @@ if ((skip_online)); then
   done
 else
   "${online_cmd[@]}"
+  if [ "${demo_trace_write_path}" != "${demo_trace_path}" ]; then
+    write_trace_source_manifest "${demo_trace_path}" "${demo_trace_write_path}"
+  fi
 fi
 reuse_selector_artifacts=0
 if ((skip_online)) \
@@ -830,6 +1105,9 @@ if ((reuse_selector_artifacts)); then
   :
 else
   "${artifact_cmd[@]}"
+  if [ "${admitted_trace_write_path}" != "${admitted_trace_path}" ]; then
+    write_trace_source_manifest "${admitted_trace_path}" "${admitted_trace_write_path}"
+  fi
 fi
 
 "${dr_dataset_cmd[@]}"
@@ -846,7 +1124,7 @@ print(int(payload["records_total"]))
 PY
 )"
 
-if [ "${dr_records_total}" -gt 0 ]; then
+if [ "${dr_records_total}" -gt 0 ] && ((skip_dr_calibrator_fit == 0)); then
   "${dr_calibrator_cmd[@]}"
 fi
 
@@ -930,7 +1208,12 @@ elif [ "${admitted_trace_records}" -gt 0 ] && [ "${contexts_admitted}" -gt 0 ]; 
     printf 'removing stale training log directory: %s\n' "${training_log_dir}"
     rm -rf -- "${training_log_dir}"
   fi
-  "${train_cmd[@]}"
+  if ((skip_backend_update)); then
+    ensure_directory "${training_log_dir}"
+    printf 'skipping backend training after demo conversion because --skip-backend-update was set\n'
+  else
+    "${train_cmd[@]}"
+  fi
 else
   ensure_directory "${training_log_dir}"
   python3 - "${demo_output_path}" "${demo_summary_path}" "${admitted_trace_path}" "${admission_summary_path}" <<'PY'
@@ -971,7 +1254,7 @@ with demo_summary_path.open("w", encoding="utf-8") as handle:
 PY
 fi
 
-python3 - "${online_results_path}" "${selector_summary_path}" "${admission_summary_path}" "${demo_summary_path}" "${dr_summary_path}" "${next_dr_calibrator_summary_path}" "${training_log_dir}" "${round_summary_path}" "${skip_backend_train}" <<'PY'
+python3 - "${online_results_path}" "${selector_summary_path}" "${admission_summary_path}" "${demo_summary_path}" "${dr_summary_path}" "${next_dr_calibrator_summary_path}" "${training_log_dir}" "${round_summary_path}" "${skip_backend_train}" "${skip_backend_update}" <<'PY'
 import json
 import pathlib
 import sys
@@ -985,6 +1268,7 @@ next_dr_calibrator_summary_path = pathlib.Path(sys.argv[6]).resolve()
 training_log_dir = pathlib.Path(sys.argv[7]).resolve()
 round_summary_path = pathlib.Path(sys.argv[8]).resolve()
 skip_backend_train = bool(int(sys.argv[9]))
+skip_backend_update = bool(int(sys.argv[10]))
 
 with online_results_path.open("r", encoding="utf-8") as handle:
     online = json.load(handle)
@@ -1008,6 +1292,7 @@ training_completed_marker = training_log_dir / "training_completed.marker"
 training_completed = replay_buffer_snapshot.exists() or training_completed_marker.exists()
 training_skipped = (
     skip_backend_train
+    or skip_backend_update
     or int(admission["contexts_admitted"]) <= 0
     or int(admission["admitted_trace_records"]) <= 0
 )
@@ -1071,6 +1356,7 @@ summary = {
         "training_completed": training_completed,
         "training_skipped": training_skipped,
         "skip_backend_train": skip_backend_train,
+        "skip_backend_update": skip_backend_update,
     },
 }
 

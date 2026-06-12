@@ -31,6 +31,10 @@ Pipeline options:
   --policy-config NAME       OpenPI serve config name (default: pi05_libero)
   --base-model-path PATH     Base OpenPI PyTorch checkpoint dir
   --artifact-root PATH       Output root for post-train artifacts
+  --training-log-root PATH   Optional RLinf training log/checkpoint root
+  --node-local-training-log-root
+                             Use /tmp/<submission-run-id> for RLinf checkpoints
+  --cleanup-training-log-dir Remove node-local RLinf logs after successful export
   --task-suite NAME          Backend LIBERO suite (default: libero_90)
   --task-ids IDS             Comma-separated task ids
   --train-max-steps COUNT    RLinf max_steps (default: 20)
@@ -79,6 +83,9 @@ config_name="libero_goal_ppo_openpi_pi05"
 policy_config="pi05_libero"
 base_model_path="/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch"
 artifact_root=""
+training_log_root=""
+node_local_training_log_root=0
+cleanup_training_log_dir=0
 task_suite="libero_90"
 task_ids="6,7,11,16,17,46,47,48,57,58,59,63,73,74,75"
 train_max_steps="20"
@@ -124,6 +131,9 @@ while (($# > 0)); do
     --policy-config) policy_config="${2:?missing value for --policy-config}"; shift 2 ;;
     --base-model-path) base_model_path="${2:?missing value for --base-model-path}"; shift 2 ;;
     --artifact-root) artifact_root="${2:?missing value for --artifact-root}"; shift 2 ;;
+    --training-log-root) training_log_root="${2:?missing value for --training-log-root}"; shift 2 ;;
+    --node-local-training-log-root) node_local_training_log_root=1; shift ;;
+    --cleanup-training-log-dir) cleanup_training_log_dir=1; shift ;;
     --task-suite) task_suite="${2:?missing value for --task-suite}"; shift 2 ;;
     --task-ids) task_ids="${2:?missing value for --task-ids}"; shift 2 ;;
     --train-max-steps) train_max_steps="${2:?missing value for --train-max-steps}"; shift 2 ;;
@@ -168,6 +178,9 @@ manifest_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1])
 if [ -n "${artifact_root}" ]; then
   artifact_root="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${artifact_root}")"
 fi
+if [ -n "${training_log_root}" ]; then
+  training_log_root="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${training_log_root}")"
+fi
 if [ -n "${exact_rollout_batch_path}" ]; then
   exact_rollout_batch_path="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "${exact_rollout_batch_path}")"
 fi
@@ -206,6 +219,9 @@ PY
 method_token="${method:-auto}"
 run_id="$(make_run_id "stagee-posttrain" "${method_token}" "heldout-n100" "${seed}" "${budget}")"
 job_name="s0pt_$(sanitize_token "${method_token}")_s${seed}_b${budget}"
+if ((node_local_training_log_root)) && [ -z "${training_log_root}" ]; then
+  training_log_root="/tmp/${run_id}_training_logs"
+fi
 
 ensure_directory "${CAVER_DEFAULT_SLURM_LOG_ROOT}"
 slurm_stdout="${CAVER_DEFAULT_SLURM_LOG_ROOT}/${run_id}-%j.out"
@@ -240,10 +256,21 @@ fi
 if ((skip_eval)); then
   resume_args+=(--skip-eval)
 fi
+cleanup_args=()
+if ((cleanup_training_log_dir)); then
+  cleanup_args+=(--cleanup-training-log-dir)
+fi
 cmd+=(
   --wrap
   "$(printf "%q " \
     env "CAVER_DEFAULT_RUNTIME_LOG_ROOT=/rdss/${CAVER_DEFAULT_ACCOUNT}/${USER}/caver/runtime_logs" \
+    "OMP_NUM_THREADS=1" \
+    "OPENBLAS_NUM_THREADS=1" \
+    "MKL_NUM_THREADS=1" \
+    "NUMEXPR_NUM_THREADS=1" \
+    "VECLIB_MAXIMUM_THREADS=1" \
+    "TORCHINDUCTOR_COMPILE_THREADS=1" \
+    "TOKENIZERS_PARALLELISM=false" \
     "${CAVER_REPO_ROOT}/scripts/stagee/run_stage0_posttrain_from_round.sh" \
     --round-results-dir "${round_results_dir}" \
     ${method:+--method "${method}"} \
@@ -252,6 +279,8 @@ cmd+=(
     --policy-config "${policy_config}" \
     --base-model-path "${base_model_path}" \
     ${artifact_root:+--artifact-root "${artifact_root}"} \
+    ${training_log_root:+--training-log-root "${training_log_root}"} \
+    "${cleanup_args[@]}" \
     --task-suite "${task_suite}" \
     --task-ids "${task_ids}" \
     --train-max-steps "${train_max_steps}" \

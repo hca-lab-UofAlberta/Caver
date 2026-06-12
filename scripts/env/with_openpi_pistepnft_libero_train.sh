@@ -52,6 +52,14 @@ if [ -n "${CAVER_OPENPI_CUDA_VISIBLE_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES="${CAVER_OPENPI_CUDA_VISIBLE_DEVICES}"
 fi
 
+if [ "${CAVER_RLINF_RAISE_NPROC_LIMIT:-1}" != "0" ]; then
+  current_nproc_limit="$(ulimit -Su 2>/dev/null || true)"
+  target_nproc_limit="${CAVER_RLINF_NPROC_LIMIT:-256}"
+  if [[ "${current_nproc_limit}" =~ ^[0-9]+$ ]] && [ "${current_nproc_limit}" -lt "${target_nproc_limit}" ]; then
+    ulimit -u "${target_nproc_limit}" 2>/dev/null || true
+  fi
+fi
+
 export PIP_CONFIG_FILE=/dev/null
 export EMBODIED_PATH="${CAVER_DEFAULT_SOURCE_ROOT}/pi-StepNFT/examples/embodiment"
 export REPO_PATH="${CAVER_DEFAULT_SOURCE_ROOT}/pi-StepNFT"
@@ -69,6 +77,18 @@ if [ -z "${PYOPENGL_PLATFORM:-}" ]; then
 fi
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export PYTHONPATH="${CAVER_DEFAULT_SOURCE_ROOT}/pi-StepNFT:${CAVER_DEFAULT_SOURCE_ROOT}/LIBERO${PYTHONPATH:+:${PYTHONPATH}}"
+export CAVER_RLINF_RAY_LOW_THREAD_MODE="${CAVER_RLINF_RAY_LOW_THREAD_MODE:-1}"
+export CAVER_RLINF_LOCAL_RAY_NUM_CPUS="${CAVER_RLINF_LOCAL_RAY_NUM_CPUS:-1}"
+export RAY_num_server_call_thread="${RAY_num_server_call_thread:-${CAVER_RLINF_RAY_NUM_SERVER_CALL_THREADS:-1}}"
+export RAY_gcs_server_rpc_server_thread_num="${RAY_gcs_server_rpc_server_thread_num:-${CAVER_RLINF_RAY_GCS_SERVER_RPC_SERVER_THREADS:-1}}"
+export RAY_gcs_server_rpc_client_thread_num="${RAY_gcs_server_rpc_client_thread_num:-${CAVER_RLINF_RAY_GCS_SERVER_RPC_CLIENT_THREADS:-1}}"
+export RAY_num_grpc_internal_threads="${RAY_num_grpc_internal_threads:-${CAVER_RLINF_RAY_GRPC_INTERNAL_THREADS:-1}}"
+export RAY_worker_num_grpc_internal_threads="${RAY_worker_num_grpc_internal_threads:-${CAVER_RLINF_RAY_WORKER_GRPC_INTERNAL_THREADS:-1}}"
+export RAY_object_manager_rpc_threads_num="${RAY_object_manager_rpc_threads_num:-${CAVER_RLINF_RAY_OBJECT_MANAGER_RPC_THREADS:-1}}"
+export RAY_enable_worker_prestart="${RAY_enable_worker_prestart:-${CAVER_RLINF_RAY_ENABLE_WORKER_PRESTART:-0}}"
+export RAY_prestart_worker_first_driver="${RAY_prestart_worker_first_driver:-${CAVER_RLINF_RAY_PRESTART_WORKER_FIRST_DRIVER:-0}}"
+export RAY_num_workers_soft_limit="${RAY_num_workers_soft_limit:-${CAVER_RLINF_RAY_NUM_WORKERS_SOFT_LIMIT:-1}}"
+export RAY_max_io_workers="${RAY_max_io_workers:-${CAVER_RLINF_RAY_MAX_IO_WORKERS:-1}}"
 export RAY_TMPDIR="${RAY_TMPDIR:-$(caver_default_ray_tmpdir)}"
 ensure_directory "${RAY_TMPDIR}"
 export TMPDIR="${TMPDIR:-${CAVER_DEFAULT_RDSS_ROOT}/tmp/${SLURM_JOB_ID:-manual}}"

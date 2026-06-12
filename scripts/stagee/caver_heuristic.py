@@ -9,14 +9,18 @@ from typing import Any, Iterable, Sequence
 
 from stage0_value_proxy import predict_value_proxy
 from stagee_dr_calibration import predict_stagee_dr_calibrator
+from stagee_lvd_selector import STAGEE_LVD_SELECTOR_MODEL_ID
+from stagee_lvd_selector import predict_lvd_selector
 
 
 CAVER_SELECTOR_IMPLEMENTATION_PHASE = "caver_selector_v1"
 CAVER_SELECTOR_MODE = "frozen_actionspace_softmax_v1"
 CAVER_SELECTOR_MODE_FITTED = "fitted_stage0_value_softmax_v1"
 CAVER_SELECTOR_MODE_DR_CALIBRATED = "lagged_dr_calibrated_softmax_v1"
+CAVER_SELECTOR_MODE_LVD = "lvd_listwise_softmax_v1"
 CAVER_ADMISSION_IMPLEMENTATION_PHASE = "caver_admission_v1"
 CAVER_ADMISSION_POLICY = "success_lcb_v1"
+BASE_FEATURE_SCHEMA = "caver_base_feature_v2_with_raw_novelty"
 
 CAVER_SELECTOR_DEFAULTS: dict[str, float | int] = {
     "value_weight": 2.0,
@@ -33,6 +37,380 @@ CAVER_SELECTOR_DEFAULTS: dict[str, float | int] = {
 }
 PROVIDER_SUMMARY_VECTOR_DIM = 10
 PROVIDER_SUMMARY_VERSION = "gesim_future_summary_v1"
+STAGE0_PROGRESS_SCHEMA = "stage0_verified_progress_v1"
+
+
+def _as_float_vector(value: Any, *, length: int | None = None) -> list[float] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return None
+    try:
+        vector = [float(item) for item in value]
+    except (TypeError, ValueError):
+        return None
+    if length is not None and len(vector) != length:
+        return None
+    return vector
+
+
+def _euclidean(values_a: Sequence[float], values_b: Sequence[float], *, dims: int = 3) -> float:
+    return math.sqrt(sum((float(a) - float(b)) ** 2 for a, b in zip(values_a[:dims], values_b[:dims])))
+
+
+def _xy_distance(values_a: Sequence[float], values_b: Sequence[float]) -> float:
+    return _euclidean(values_a, values_b, dims=2)
+
+
+def _normalize_entity_name(name: str) -> str:
+    normalized = name.lower().replace("_", " ")
+    normalized = normalized.replace(" 1", "").replace(" 2", "").replace(" 3", "")
+    normalized = normalized.replace(" default site", "").replace(" main", "")
+    return " ".join(normalized.split())
+
+
+def _position_items(payload: dict[str, Any], key: str) -> list[tuple[str, list[float]]]:
+    raw_positions = payload.get(key)
+    if not isinstance(raw_positions, dict):
+        return []
+    items: list[tuple[str, list[float]]] = []
+    for name, value in raw_positions.items():
+        vector = _as_float_vector(value, length=3)
+        if vector is not None:
+            items.append((str(name), vector))
+    return items
+
+
+def _extract_pick_object_phrase(task_description: str) -> str | None:
+    text = task_description.lower()
+    marker = "pick up the "
+    if marker not in text:
+        return None
+    phrase = text.split(marker, 1)[1]
+    for delimiter in (" and put", " and place", " and stack", " on the ", " into "):
+        if delimiter in phrase:
+            phrase = phrase.split(delimiter, 1)[0]
+    phrase = phrase.strip()
+    return phrase or None
+
+
+def _find_position_by_terms(
+    positions: list[tuple[str, list[float]]],
+    terms: Sequence[str],
+    *,
+    exclude_terms: Sequence[str] = (),
+) -> tuple[str, list[float]] | None:
+    normalized_terms = [_normalize_entity_name(term) for term in terms if term]
+    normalized_exclude = [_normalize_entity_name(term) for term in exclude_terms if term]
+    best: tuple[int, str, list[float]] | None = None
+    for name, vector in positions:
+        normalized_name = _normalize_entity_name(name)
+        if any(term and term in normalized_name for term in normalized_exclude):
+            continue
+        score = sum(1 for term in normalized_terms if term and term in normalized_name)
+        if score <= 0:
+            continue
+        candidate = (score, name, vector)
+        if best is None or candidate[0] > best[0]:
+            best = candidate
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
+def _object_to_target_progress(
+    semantic_state: dict[str, Any],
+    *,
+    target_terms: Sequence[str],
+) -> dict[str, Any]:
+    task_description = str(semantic_state.get("task_description") or "")
+    object_positions = _position_items(semantic_state, "object_positions")
+    site_positions = _position_items(semantic_state, "site_positions")
+    body_positions = _position_items(semantic_state, "body_positions")
+    source_phrase = _extract_pick_object_phrase(task_description)
+    source_terms = [source_phrase] if source_phrase else []
+    source = _find_position_by_terms(
+        object_positions,
+        source_terms,
+        exclude_terms=target_terms,
+    )
+    if source is None:
+        source = _find_position_by_terms(
+            object_positions,
+            ["book", "cream cheese", "ketchup", "tomato sauce", "alphabet soup"],
+            exclude_terms=target_terms,
+        )
+    target = _find_position_by_terms(site_positions, target_terms)
+    target_source = "site_positions"
+    if target is None:
+        target = _find_position_by_terms(object_positions, target_terms)
+        target_source = "object_positions"
+    if target is None:
+        target = _find_position_by_terms(body_positions, target_terms)
+        target_source = "body_positions"
+    if source is None or target is None:
+        return {
+            "available": False,
+            "progress_value": None,
+            "progress_source": "object_to_target_distance_decrease",
+            "reason": "missing_source_or_target",
+        }
+    distance = _euclidean(source[1], target[1], dims=3)
+    return {
+        "available": True,
+        "progress_value": -float(distance),
+        "progress_source": "object_to_target_distance_decrease",
+        "distance": float(distance),
+        "source_object": source[0],
+        "target_object": target[0],
+        "target_source": target_source,
+    }
+
+
+def _stack_progress(semantic_state: dict[str, Any]) -> dict[str, Any]:
+    object_positions = [
+        (name, vector)
+        for name, vector in _position_items(semantic_state, "object_positions")
+        if "bowl" in _normalize_entity_name(name)
+    ]
+    if len(object_positions) < 2:
+        return {
+            "available": False,
+            "progress_value": None,
+            "progress_source": "stack_height_horizontal_progress",
+            "reason": "fewer_than_two_stack_objects",
+        }
+    best: dict[str, Any] | None = None
+    for source_name, source_pos in object_positions:
+        for target_name, target_pos in object_positions:
+            if source_name == target_name:
+                continue
+            xy_dist = _xy_distance(source_pos, target_pos)
+            height_delta = float(source_pos[2] - target_pos[2])
+            score = height_delta - (2.0 * xy_dist)
+            if best is None or score > float(best["progress_value"]):
+                best = {
+                    "available": True,
+                    "progress_value": float(score),
+                    "progress_source": "stack_height_horizontal_progress",
+                    "source_object": source_name,
+                    "target_object": target_name,
+                    "height_delta": height_delta,
+                    "xy_distance": float(xy_dist),
+                }
+    return best if best is not None else {
+        "available": False,
+        "progress_value": None,
+        "progress_source": "stack_height_horizontal_progress",
+        "reason": "no_stack_pair",
+    }
+
+
+def _drawer_progress(semantic_state: dict[str, Any]) -> dict[str, Any]:
+    task_description = str(semantic_state.get("task_description") or "").lower()
+    joint_qpos = semantic_state.get("joint_qpos")
+    if not isinstance(joint_qpos, dict):
+        joint_qpos = {}
+    if "bottom" in task_description:
+        terms = ["bottom"]
+    elif "middle" in task_description:
+        terms = ["middle"]
+    elif "top" in task_description:
+        terms = ["top"]
+    else:
+        terms = ["drawer", "cabinet"]
+    candidates: list[tuple[str, float]] = []
+    for name, value in joint_qpos.items():
+        normalized_name = _normalize_entity_name(str(name))
+        if not any(term in normalized_name for term in terms):
+            continue
+        try:
+            qpos = float(value)
+        except (TypeError, ValueError):
+            continue
+        candidates.append((str(name), qpos))
+    if not candidates:
+        return {
+            "available": False,
+            "progress_value": None,
+            "progress_source": "drawer_open_fraction",
+            "reason": "missing_drawer_joint",
+        }
+    name, qpos = max(candidates, key=lambda item: abs(item[1]))
+    return {
+        "available": True,
+        "progress_value": abs(float(qpos)),
+        "progress_source": "drawer_open_fraction",
+        "joint_name": name,
+        "joint_qpos": float(qpos),
+    }
+
+
+def compute_progress_value_from_semantic_state(semantic_state: dict[str, Any]) -> dict[str, Any]:
+    family_id = str(semantic_state.get("proxy_family_id") or "")
+    task_description = str(semantic_state.get("task_description") or "")
+    target_terms: list[str] = []
+    if family_id == "block_to_tray_proxy":
+        target_terms = ["tray"]
+    elif family_id == "container_insertion_proxy":
+        target_terms = ["basket", "bowl", "container"]
+    elif family_id == "relocate_to_region_proxy":
+        if "front compartment" in task_description.lower():
+            target_terms = ["front contain region", "front compartment", "caddy front"]
+        elif "left compartment" in task_description.lower():
+            target_terms = ["left contain region", "left compartment", "caddy left"]
+        elif "right compartment" in task_description.lower():
+            target_terms = ["right contain region", "right compartment", "caddy right"]
+        else:
+            target_terms = ["contain region", "compartment", "caddy"]
+    elif family_id == "two_object_stack_proxy":
+        result = _stack_progress(semantic_state)
+        result["schema"] = STAGE0_PROGRESS_SCHEMA
+        result["proxy_family_id"] = family_id
+        return result
+    elif family_id == "drawer_open_proxy":
+        result = _drawer_progress(semantic_state)
+        result["schema"] = STAGE0_PROGRESS_SCHEMA
+        result["proxy_family_id"] = family_id
+        return result
+    else:
+        target_terms = ["tray", "basket", "bowl", "container", "region"]
+    result = _object_to_target_progress(semantic_state, target_terms=target_terms)
+    result["schema"] = STAGE0_PROGRESS_SCHEMA
+    result["proxy_family_id"] = family_id
+    return result
+
+
+def _progress_entry_value(entry: dict[str, Any]) -> float | None:
+    progress = entry.get("progress")
+    if isinstance(progress, dict):
+        value = progress.get("progress_value")
+    else:
+        value = entry.get("progress_value")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def compute_progress_series(trace_records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    series: list[dict[str, Any]] = []
+    cumulative_step = 0
+    for record in sorted(trace_records, key=lambda item: int(item.get("policy_query_index") or 0)):
+        query_index = int(record.get("policy_query_index") or 0)
+        if not series:
+            start_progress = record.get("stage0_progress_start")
+            if isinstance(start_progress, dict):
+                value = _progress_entry_value({"progress": start_progress})
+                if value is not None:
+                    series.append(
+                        {
+                            "step": 0,
+                            "policy_query_index": query_index,
+                            "step_in_query": 0,
+                            "progress_value": value,
+                            "progress": start_progress,
+                        }
+                    )
+        progress_sequence = record.get("stage0_progress_sequence")
+        if not isinstance(progress_sequence, Sequence) or isinstance(progress_sequence, (str, bytes)):
+            cumulative_step += int(record.get("steps_executed") or len(record.get("actions") or []))
+            continue
+        for step_offset, progress in enumerate(progress_sequence, start=1):
+            if not isinstance(progress, dict):
+                continue
+            value = _progress_entry_value({"progress": progress})
+            if value is None:
+                continue
+            series.append(
+                {
+                    "step": cumulative_step + step_offset,
+                    "policy_query_index": query_index,
+                    "step_in_query": step_offset,
+                    "progress_value": value,
+                    "progress": progress,
+                }
+            )
+        cumulative_step += int(record.get("steps_executed") or len(record.get("actions") or []))
+    return series
+
+
+def find_best_progress_segment(
+    progress_series: Sequence[dict[str, Any]],
+    *,
+    min_progress_gain: float,
+    min_steps: int,
+    max_regression: float = 0.10,
+) -> dict[str, Any] | None:
+    valid_points = [
+        point for point in progress_series
+        if point.get("progress_value") is not None and int(point.get("step") or 0) >= 0
+    ]
+    if len(valid_points) < 2:
+        return None
+    start = valid_points[0]
+    start_value = float(start["progress_value"])
+    candidates = [point for point in valid_points[1:] if int(point.get("step") or 0) >= int(min_steps)]
+    if not candidates:
+        return None
+    best = max(
+        candidates,
+        key=lambda point: (
+            float(point["progress_value"]) - start_value,
+            int(point.get("step") or 0),
+        ),
+    )
+    best_index = valid_points.index(best)
+    prefix_values = [float(point["progress_value"]) for point in valid_points[: best_index + 1]]
+    worst_regression = min(prefix_values) - start_value
+    progress_gain = float(best["progress_value"]) - start_value
+    if progress_gain < float(min_progress_gain):
+        return None
+    if worst_regression < -abs(float(max_regression)):
+        return None
+    return {
+        "repair_start_step": 1,
+        "repair_end_step": int(best["step"]),
+        "repair_end_query_index": int(best["policy_query_index"]),
+        "repair_end_step_in_query": int(best["step_in_query"]),
+        "repair_progress_gain": progress_gain,
+        "repair_start_progress": start_value,
+        "repair_end_progress": float(best["progress_value"]),
+        "repair_worst_regression": float(worst_regression),
+        "repair_progress_source": (
+            best.get("progress", {}).get("progress_source") if isinstance(best.get("progress"), dict) else None
+        ),
+        "repair_policy": "verified_progress_prefix_v1",
+    }
+
+
+def segment_repair_eligible(
+    context_record: dict[str, Any],
+    trace_records: Sequence[dict[str, Any]],
+    *,
+    min_progress_gain: float,
+    min_steps: int,
+    max_regression: float = 0.10,
+) -> dict[str, Any] | None:
+    if bool(context_record.get("success")):
+        return None
+    if int(context_record.get("trace_record_count") or 0) <= 0:
+        return None
+    if context_record.get("error") is not None:
+        return None
+    if bool((context_record.get("budget") or {}).get("safety_abort", False)):
+        return None
+    series = compute_progress_series(trace_records)
+    segment = find_best_progress_segment(
+        series,
+        min_progress_gain=min_progress_gain,
+        min_steps=min_steps,
+        max_regression=max_regression,
+    )
+    if segment is None:
+        return None
+    segment["repair_progress_point_count"] = len(series)
+    return segment
 
 
 def _as_chunk_array(candidate_chunk: Sequence[Sequence[float]]) -> list[list[float]]:
@@ -227,17 +605,23 @@ def compute_candidate_metrics(
                 _vector_norm(
                     [
                         feature_value - history_value
-                        for feature_value, history_value in zip(base_feature, history_feature)
+                        for feature_value, history_value in zip(
+                            base_feature,
+                            history_feature[: len(base_feature)],
+                        )
                     ]
                 )
                 / float(len(base_feature))
                 for history_feature in history
             )
+        base_feature_with_novelty = [*base_feature, raw_novelty]
 
         metrics.append(
             {
                 "chunk_action_horizon": horizon,
-                "action_summary_dim": len(base_feature),
+                "action_summary_dim": len(base_feature_with_novelty),
+                "base_feature_schema": BASE_FEATURE_SCHEMA,
+                "base_feature_without_novelty_dim": len(base_feature),
                 "mean_arm_norm": mean_arm_norm,
                 "mean_full_norm": mean_full_norm,
                 "smoothness": smoothness,
@@ -258,7 +642,7 @@ def compute_candidate_metrics(
         raw_uncertainties.append(raw_uncertainty)
         raw_diversities.append(raw_diversity)
         raw_novelties.append(raw_novelty)
-        base_features.append(base_feature)
+        base_features.append(base_feature_with_novelty)
 
     value_ranknorm = _ranknorm(raw_values)
     normalized_uncertainty = _minmax(raw_uncertainties)
@@ -291,6 +675,7 @@ def compute_selector_decision(
     rng: Any | None,
     value_proxy_model: dict[str, Any] | None = None,
     dr_calibrator_model: dict[str, Any] | None = None,
+    lvd_selector_model: dict[str, Any] | None = None,
     proxy_family_id: str | None = None,
     policy_query_index: int = 0,
 ) -> dict[str, Any]:
@@ -394,24 +779,49 @@ def compute_selector_decision(
             metric["raw_uncertainty_proxy"] = float(scale_inputs[index])
             metric["uncertainty_normalized"] = float(normalized_uncertainty[index])
 
+    temperature = float(CAVER_SELECTOR_DEFAULTS["temperature"])
+    exploration_floor = float(CAVER_SELECTOR_DEFAULTS["exploration_floor"])
     raw_scores = []
-    for metric in metrics:
-        raw_scores.append(
-            (float(CAVER_SELECTOR_DEFAULTS["value_weight"]) * metric["value_ranknorm"])
-            + (float(CAVER_SELECTOR_DEFAULTS["uncertainty_weight"]) * metric["uncertainty_normalized"])
-            + (float(CAVER_SELECTOR_DEFAULTS["diversity_weight"]) * metric["diversity_normalized"])
-            + (float(CAVER_SELECTOR_DEFAULTS["novelty_weight"]) * metric["novelty_normalized"])
-        )
+    if lvd_selector_model is not None:
+        selector_mode = str(lvd_selector_model.get("selector_mode") or CAVER_SELECTOR_MODE_LVD)
+        lvd_model_id = str(lvd_selector_model.get("model_id") or STAGEE_LVD_SELECTOR_MODEL_ID)
+        value_proxy_source = lvd_model_id
+        value_proxy_model_id = lvd_model_id
+        utility_scale_source = lvd_model_id
+        utility_scale_model_id = lvd_model_id
+        temperature = float(lvd_selector_model.get("selector_temperature", temperature))
+        exploration_floor = float(lvd_selector_model.get("exploration_floor", exploration_floor))
+        for metric in metrics:
+            prediction = predict_lvd_selector(
+                lvd_selector_model,
+                base_feature_vector=metric["base_feature_vector"],
+                proxy_family_id=proxy_family_id,
+                policy_query_index=policy_query_index,
+            )
+            score = float(prediction["score"])
+            raw_scores.append(score)
+            metric["lvd_selector_score"] = score
+            metric["lvd_selector_model_id"] = lvd_model_id
+            metric["lvd_selector_model_path"] = str(prediction["model_path"])
+            metric["lvd_selector_source"] = str(lvd_selector_model.get("target_source") or "unknown")
+            metric["value_proxy_source"] = value_proxy_source
+            metric["utility_scale_source"] = utility_scale_source
+    else:
+        for metric in metrics:
+            raw_scores.append(
+                (float(CAVER_SELECTOR_DEFAULTS["value_weight"]) * metric["value_ranknorm"])
+                + (float(CAVER_SELECTOR_DEFAULTS["uncertainty_weight"]) * metric["uncertainty_normalized"])
+                + (float(CAVER_SELECTOR_DEFAULTS["diversity_weight"]) * metric["diversity_normalized"])
+                + (float(CAVER_SELECTOR_DEFAULTS["novelty_weight"]) * metric["novelty_normalized"])
+            )
 
     safe_scores = [raw_scores[index] for index in safe_indices]
-    temperature = float(CAVER_SELECTOR_DEFAULTS["temperature"])
     maximum_logit = max(safe_scores) / temperature
     safe_softmax = [math.exp((score / temperature) - maximum_logit) for score in safe_scores]
     softmax_total = sum(safe_softmax)
     safe_softmax = [value / softmax_total for value in safe_softmax]
 
     candidate_count = len(metrics)
-    exploration_floor = float(CAVER_SELECTOR_DEFAULTS["exploration_floor"])
     candidate_probabilities = [0.0] * candidate_count
     for local_index, candidate_index in enumerate(safe_indices):
         candidate_probabilities[candidate_index] = float((1.0 - exploration_floor) * safe_softmax[local_index])
@@ -465,6 +875,7 @@ def compute_selector_decision(
             "diversity_weight": float(CAVER_SELECTOR_DEFAULTS["diversity_weight"]),
             "novelty_weight": float(CAVER_SELECTOR_DEFAULTS["novelty_weight"]),
             "provider_value_weight": float(CAVER_SELECTOR_DEFAULTS["provider_value_weight"]),
+            "lvd_selector_active": float(1.0 if lvd_selector_model is not None else 0.0),
         },
     }
 
@@ -477,20 +888,40 @@ def append_selector_history(history: collections.deque[list[float]], feature_vec
     history.append([float(value) for value in feature_vector])
 
 
-def selected_metric_from_record(trace_record: dict[str, Any]) -> dict[str, Any]:
+def selected_metric_from_record(
+    trace_record: dict[str, Any],
+    *,
+    value_proxy_model: dict[str, Any] | None = None,
+    dr_calibrator_model: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     selector = trace_record.get("selector", {})
     selected_index = int(selector["selected_candidate_index"])
-    if "candidate_metric_table" in selector:
-        metric_table = selector["candidate_metric_table"]
+    metric_table = selector.get("candidate_metric_table")
+    if metric_table:
         return dict(metric_table[selected_index])
     candidate_chunks = trace_record.get("candidate_chunks")
     if candidate_chunks is None:
         raise ValueError(f"trace record for context {trace_record.get('context_id')} is missing candidate chunks")
-    metrics = compute_candidate_metrics(
-        candidate_chunks,
-        candidate_provider_aux=trace_record.get("candidate_provider_aux"),
-        history_vectors=None,
-    )
+    safe_candidate_mask = selector.get("safe_candidate_mask")
+    if value_proxy_model is not None or dr_calibrator_model is not None:
+        selector_decision = compute_selector_decision(
+            candidate_chunks,
+            safe_candidate_mask=safe_candidate_mask,
+            candidate_provider_aux=trace_record.get("candidate_provider_aux"),
+            history_vectors=None,
+            rng=None,
+            value_proxy_model=value_proxy_model,
+            dr_calibrator_model=dr_calibrator_model,
+            proxy_family_id=trace_record.get("proxy_family_id"),
+            policy_query_index=int(trace_record.get("policy_query_index") or 0),
+        )
+        metrics = selector_decision["candidate_metrics"]
+    else:
+        metrics = compute_candidate_metrics(
+            candidate_chunks,
+            candidate_provider_aux=trace_record.get("candidate_provider_aux"),
+            history_vectors=None,
+        )
     metric = dict(metrics[selected_index])
     metric.update(
         {
@@ -505,8 +936,17 @@ def summarize_admission_context(
     *,
     context: dict[str, Any],
     context_trace_records: Sequence[dict[str, Any]],
+    value_proxy_model: dict[str, Any] | None = None,
+    dr_calibrator_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    selected_metrics = [selected_metric_from_record(record) for record in context_trace_records]
+    selected_metrics = [
+        selected_metric_from_record(
+            record,
+            value_proxy_model=value_proxy_model,
+            dr_calibrator_model=dr_calibrator_model,
+        )
+        for record in context_trace_records
+    ]
     return summarize_admission_metrics(context=context, selected_metrics=selected_metrics)
 
 
@@ -514,7 +954,15 @@ def summarize_admission_metrics(
     *,
     context: dict[str, Any],
     selected_metrics: Sequence[dict[str, Any]],
+    kappa: float | None = None,
+    acceptance_threshold: float | None = None,
 ) -> dict[str, Any]:
+    resolved_kappa = float(CAVER_SELECTOR_DEFAULTS["kappa"]) if kappa is None else float(kappa)
+    resolved_threshold = (
+        float(CAVER_SELECTOR_DEFAULTS["acceptance_threshold"])
+        if acceptance_threshold is None
+        else float(acceptance_threshold)
+    )
     if selected_metrics:
         utility_mean = sum(
             float(metric.get("admission_value_proxy", metric["value_ranknorm"])) for metric in selected_metrics
@@ -532,7 +980,7 @@ def summarize_admission_metrics(
             len(selected_metrics)
         )
         novelty_mean = sum(metric["novelty_normalized"] for metric in selected_metrics) / float(len(selected_metrics))
-        lcb = utility_mean - (float(CAVER_SELECTOR_DEFAULTS["kappa"]) * uncertainty_mean)
+        lcb = utility_mean - (resolved_kappa * uncertainty_mean)
     else:
         utility_mean = 0.0
         uncertainty_mean = 0.0
@@ -545,7 +993,7 @@ def summarize_admission_metrics(
     safety_abort = bool(context.get("budget", {}).get("safety_abort", False))
     has_trace = bool(selected_metrics)
     admit_for_training = has_trace and not has_error and not safety_abort and success and (
-        lcb > float(CAVER_SELECTOR_DEFAULTS["acceptance_threshold"])
+        lcb > resolved_threshold
     )
 
     if not has_trace:
@@ -558,7 +1006,7 @@ def summarize_admission_metrics(
         admission_reason = "failed_execution"
     elif lcb <= 0.0:
         admission_reason = "success_nonpositive_lcb"
-    elif lcb <= float(CAVER_SELECTOR_DEFAULTS["acceptance_threshold"]):
+    elif lcb <= resolved_threshold:
         admission_reason = "success_abstain_low_confidence"
     else:
         admission_reason = "success_high_confidence"
@@ -573,6 +1021,6 @@ def summarize_admission_metrics(
         "admit_for_training": admit_for_training,
         "admission_reason": admission_reason,
         "admission_confidence": max(0.0, min(1.0, lcb)),
-        "acceptance_threshold": float(CAVER_SELECTOR_DEFAULTS["acceptance_threshold"]),
-        "kappa": float(CAVER_SELECTOR_DEFAULTS["kappa"]),
+        "acceptance_threshold": resolved_threshold,
+        "kappa": resolved_kappa,
     }

@@ -8,6 +8,7 @@
 \usepackage{amsthm}
 \usepackage{booktabs,tabularx,array,multirow,longtable}
 \usepackage{graphicx}
+\graphicspath{{figures/}}
 \usepackage{listings,xcolor}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
@@ -33,7 +34,7 @@
 \titleformat{\subsection}{\normalsize\bfseries\color{Accent2}}{\thesubsection}{0.6em}{}
 \pagestyle{fancy}
 \fancyhf{}
-\lhead{CAVER: selective real verification for VLA post-training}
+\lhead{CAVER: selective trusted verification for VLA post-training}
 \rhead{\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 
@@ -54,25 +55,69 @@
 \newcommand{\argmax}{\mathop{\mathrm{argmax}}}
 
 \title{\textbf{CAVER: Calibrated Active Verification for Sample-Efficient Post-Training of Vision-Language-Action Policies}\\[0.35em]
-\large Simulation-first Stage-0 LIBERO results with a planned transfer to PiPER}
+\large Simulation-first LIBERO evidence for CAVER+FASR, with a gated PiPER Stage-F transfer plan}
 \author{}
-\date{April 2026}
+\date{June 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-This paper studies one practical question in VLA post-training: when only a small number of trusted executions can be afforded, how should those executions be spent so that a policy improves reliably? CAVER is written at two levels. At the \emph{method level}, it is interface-general: it assumes only (i) a deterministic execution adapter $\Gamma_{\mathrm{exec}}$ that maps raw backbone chunks into a safety-checkable execution space, (ii) a provider adapter $\Phi_{\Omega}$ that maps execution chunks into the frozen provider's conditioning format, (iii) a deterministic safety shield $S_{\mathrm{safe}}$, and (iv) a verified labeler $M_{\mathrm{task}}$ that maps an executed episode to a trusted outcome. At the \emph{implementation level}, we pin one staged study on the pretrained $\pi_{0.5}$ backbone from \texttt{openpi}, frozen GE-Sim from Genie Envisioner, Stage 0 trusted execution in LIBERO simulation, and a planned Stage 1 real transfer on PiPER \citep{liao2025genie,genierepo2026}.
+CAVER studies a practical VLA post-training question: if only a small number of trusted executions are affordable, which attempted actions should be run, and which executed trajectories should be used to update the policy? The method samples several short candidate action chunks, uses a frozen future predictor as a cheap but imperfect hint, executes only one safe candidate, and logs exactly how that candidate was chosen.
 
-Within that interface, the paper makes two more locked choices. First, the update backend is a $\pi$-StepNFT-style executed-trajectory objective, not PPO or critic-heavy Q-learning \citep{wang2026pistepnft}. Second, the selector architecture is fixed after Stage 0; only its utility inputs are refreshed round-by-round through a lagged doubly robust calibrator. At each decision context, $\pi_{0.5}$ proposes $K=4$ action chunks of horizon $H=4$. A frozen provider predicts a short-horizon future for each chunk, a three-head MLP proxy trained on Stage-0 tuples supplies a cheap utility prior, and a stochastic selector chooses one safe candidate for trusted execution while logging its exact propensity. The resulting binary outcome is turned into candidate-level doubly robust pseudo-outcomes for all safety-approved candidates, and only executed trajectories that clear a conservative admission rule are passed to the unchanged backend.
+The implementation is simulation-first. Stage 0 uses LIBERO as the trusted execution environment with the pretrained $\pi_{0.5}$ backbone from \texttt{openpi} and frozen GE-Sim from Genie Envisioner. Stage 1 is a planned transfer to PiPER hardware \citep{liao2025genie,genierepo2026}. The robot- or simulator-specific pieces are isolated behind four adapters: execution, provider input, safety checks, and task labeling.
 
-The current completed empirical result is the strict proposal-mainline Stage-0 LIBERO comparison at budget $N=50$ over three seeds. Lagged CAVER reaches held-out validation/test success of $0.200/0.223$ versus $0.203/0.213$ for the real-only baseline, while online success is slightly lower ($0.387$ versus $0.400$). The important difference is data use: CAVER admits only $338$ demo items and $1338$ primitive steps on average, whereas the real-only baseline passes $3807$ demo items and $15194$ primitive steps into the same backend. The current claim is therefore deliberately narrow: CAVER is supported as a \emph{sample-efficiency layer} around a fixed flow-based post-training stack, not as a dominant raw-success replacement for real-only fine-tuning.
+The main Stage-0 empirical variant is CAVER+FASR: CAVER's provider-aware selection and calibration combined with failure-aware segment repair. Strict CAVER, which admits only confident full successful trajectories, is retained as the conservative base rule and ablation. In LIBERO, CAVER+FASR reaches held-out test success $0.237$ at $N=25$ with $796$ admitted demo items, versus $0.227$ with $1885$ demo items for vanilla $K=1$; at $N=50$ it reaches $0.240$ with $785$ demo items. A vanilla $K=1$+FASR control reaches only $0.223$ at $N=25$, so the completed evidence does not reduce to FASR on a single sampled chunk. The remaining fairness control, uniform $K=4$+FASR, is running and is not yet claimed as completed. These results support a simulation-stage selective-admission/sample-efficiency claim, while full real-robot sample efficiency remains the Stage-1 question. FASR requires reliable task-progress labels; if a task cannot provide them, the hardware method falls back to strict CAVER.
 \end{abstract}
 
 
 \begin{quote}
-\textbf{Thesis in one sentence.} Use one frozen provider for scale, use one small budget of real executions for truth, and place an interface-general selective-verification layer between them, with one fully pinned Stage-0 LIBERO simulation instantiation and one fully pinned Stage-1 PiPER hardware instantiation in the implementation plan.
+\textbf{Thesis in one sentence.} Use one frozen provider for scale, use one small budget of trusted executions for truth, and place an interface-general selective-verification layer between them, with one fully pinned Stage-0 LIBERO simulation instantiation and one fully pinned Stage-1 PiPER hardware instantiation in the implementation plan.
 \end{quote}
+
+\begin{table}[H]
+\centering
+\small
+\caption*{What is completed and what is planned}
+\begin{tabularx}{\linewidth}{@{}p{3.2cm}p{4.2cm}X@{}}
+\toprule
+Item & Status & What the reader should conclude \\
+\midrule
+Stage-0 LIBERO & Completed simulation evidence & CAVER+FASR is currently the strongest empirical variant. It modestly improves held-out test success over vanilla $K=1$ at $N=25$ and $N=50$ while admitting far fewer backend records. \\
+Strict CAVER & Completed base ablation & Shows strong backend-data compression but does not clearly beat vanilla $K=1$ in raw held-out success. \\
+FASR fairness controls & Partly completed, partly running & Vanilla $K=1$+FASR at $N=25$ does not explain the CAVER+FASR gain. Uniform $K=4$+FASR is the active control needed to separate CAVER selection from progress-label repair. \\
+PiPER hardware & Planned Stage-F/Stage-1 path & No real-robot learning result is claimed. Stage F is the hardware-readiness gate before budgeted PiPER learning: shadow mode, safety, labeler, latency, and progress-label validation. \\
+Scope of claim & Simulation-first, selective-admission claim & The current evidence supports selective-admission/sample-efficiency in LIBERO, not broad raw-success dominance or completed real-robot sample efficiency. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\caption*{Plain-language guide to the main mathematical terms}
+\begin{tabularx}{\linewidth}{@{}p{3.1cm}X@{}}
+\toprule
+Term & Meaning in this paper \\
+\midrule
+Decision context & One moment where the policy chooses the next short action chunk, not one low-level control tick. \\
+Candidate chunk & One possible short action sequence. In CAVER and the matched uniform baseline, $K=4$ candidates are sampled and each has $H=4$ commands, about 0.4 s of motion. The vanilla baseline uses $K=1$. \\
+Trusted execution & Actually running one selected candidate in LIBERO or on PiPER and measuring the task outcome. \\
+Stage F & The hardware-readiness gate before budgeted PiPER learning. It includes no-motion shadow mode, safety validation, labeler validation, progress-label validation, and latency checks. \\
+Provider & A frozen future predictor. GE-Sim gives cheap predicted futures; CAVER treats them as useful but fallible hints. \\
+Selector & The rule that assigns probabilities to safe candidates and samples one to execute. \\
+Propensity & The exact probability with which the executed candidate was selected. It is logged so later correction is auditable. \\
+Calibrator & A small model that converts cheap features into a corrected value and uncertainty after seeing verified outcomes. \\
+DR correction & A standard correction that combines the observed outcome of the executed candidate with the logged selection probability. It reduces bias from executing only one candidate. \\
+Conservative score / LCB & The corrected value minus an uncertainty penalty. CAVER admits a trajectory to backend training only when this score is high enough. \\
+FASR & Failure-aware segment repair. If a failed episode contains a short, verified-progress prefix, CAVER+FASR may admit that prefix as a repair segment instead of relabeling the whole failed episode as successful. \\
+Online success & Success observed during the training-context collection episodes. It is useful for diagnostics, but it is not disjoint evaluation. \\
+Held-out validation/test success & Success on disjoint LIBERO or PiPER evaluation episodes that are not admitted to training or calibrator fitting. \\
+Admitted demo items & The training records actually passed into the unchanged backend. This can be far smaller than the number of executed contexts. \\
+Primitive steps & Low-level action-step records inside admitted trajectories. \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 
 \begin{table}[H]
@@ -87,10 +132,11 @@ Action backbone & Pretrained $\pi_{0.5}$ from \texttt{openpi} & Matches the publ
 Method presentation & Interface-general modules $(\Gamma_{\mathrm{exec}},\Phi_{\Omega},S_{\mathrm{safe}},M_{\mathrm{task}})$ plus concrete Stage-0 LIBERO and Stage-1 PiPER instantiations & Keeps the scientific claim at the interface level while preserving one exactly reproducible simulation-first path and one exactly reproducible hardware transfer study. \\
 Cheap future provider & Frozen GE-Sim from Genie Envisioner & Satisfies the preference for an off-the-shelf world model and keeps the paper about verification rather than training a new simulator \citep{liao2025genie,genierepo2026}. \\
 Concrete trusted-execution stacks & LIBERO simulation in Stage 0; PiPER single-arm manipulation in Stage 1 & Makes the debugging and calibration stage concrete before the real study while keeping the eventual hardware transfer equally auditable. \\
-Cheap utility head & Small 3-head MLP trained only on Stage 0 + seed real data & Avoids training a world model from scratch while still providing a task-specific scalar for selection. \\
-Real-only backend & $\pi$-StepNFT-style executed-trajectory fine-tuning & Fits flow-based VLAs without requiring tractable action likelihoods or a learned critic \citep{wang2026pistepnft,pistepnftrepo2026}. \\
+Cheap utility head & Small 3-head MLP trained on Stage-0 data plus the shared Stage-1 seed set & Avoids training a world model from scratch while still providing a task-specific scalar for selection. \\
+Executed-update backend & $\pi$-StepNFT-style executed-trajectory fine-tuning & Fits flow-based VLAs without requiring tractable action likelihoods or a learned critic \citep{wang2026pistepnft,pistepnftrepo2026}. \\
 Execution safety & Shared deterministic safety shield plus runtime abort rules & Prevents unsafe candidate chunks from reaching hardware and makes the real study auditable across methods. \\
 Selector learning & No online selector-parameter learning in the main method & Keeps the verification rule fixed and auditable. The selector form and coefficients are frozen after Stage 0; only the utility inputs refresh. \\
+Main admission rule & CAVER+FASR for the Stage-0 empirical main variant; strict CAVER as the conservative base ablation & FASR addresses sparse-success regimes by preserving successes and adding only short verified-progress repair segments from failures, without changing the backend objective. \\
 Frozen features & Provider and calibration features come from frozen encoders & Keeps the cheap-feature space fixed while policy adaptation touches only LoRA modules in the action head. \\
 World-model baseline & WoVR via RLinf & Gives the strongest world-model-heavy comparison already supported in a public RL stack \citep{jiang2026wovr,rlinfrepo2026}. \\
 \bottomrule
@@ -100,7 +146,7 @@ World-model baseline & WoVR via RLinf & Gives the strongest world-model-heavy co
 \section{Introduction}
 World models, verifier scores, and large VLA backbones have made it easy to generate many candidate robot behaviors together with cheap predicted futures and cheap reward-like signals. At the same time, recent post-training work keeps returning to the same bottleneck: the hard part is not producing \emph{more} feedback, but producing feedback that is trustworthy enough to update the policy \citep{tan2025riptvla,jiang2026wovr,li2025worldmodelbench}. World-VLA-Loop, WoVR, TGRPO, NORA-1.5, and VLA-RFT all illustrate versions of the same tension. Learned simulators and reward proxies can provide scale, but simulator hallucination, compounding error, sparse success labels, and proxy exploitation make naive optimization brittle \citep{liu2026worldvlaloop,jiang2026wovr,chen2025tgrpo,hung2025nora15,li2025vlarft}.
 
-This paper takes that tension as the central problem. Let $M$ be a large pool of cheap imagined or proxy-scored candidates, and let $N \ll M$ be a much smaller set of verified real robot executions. The scientific question is not ``which reward function should we use?'' It is: \emph{how should a small real verification budget be allocated and converted into a reliable policy-improvement signal?}
+This paper takes that tension as the central problem. Let $M$ be a large pool of cheap imagined or proxy-scored candidates, and let $N \ll M$ be a much smaller set of trusted executions. The scientific question is not ``which reward function should we use?'' It is: \emph{how should a small trusted-execution budget be allocated and converted into a reliable policy-improvement signal?} In Stage 0 the trusted executor is LIBERO simulation; in Stage 1 it is the PiPER robot.
 
 The theory here is deliberately narrow. It justifies a \emph{context-level} verification rule conditional on the stream of decision contexts that actually occurs; it does not claim a full episodic policy-improvement guarantee after online backbone updates.
 
@@ -108,38 +154,71 @@ This question is especially sharp for flow-based VLAs. The current public \textt
 
 A second key design choice is to treat the world model as a \emph{frozen provider} rather than a new training target. The mainline method therefore uses a frozen off-the-shelf provider, with GE-Sim from Genie Envisioner as the primary choice because the public repository exposes code, released weights for GE-Sim, and example inference scripts that consume images, camera intrinsics/extrinsics, and action arrays \citep{liao2025genie,genierepo2026}. This keeps the contribution focused on verification and makes the approach transferable across backbones and world models.
 
-Finally, the paper is positioned as publishable because the claim is deliberately modest. CAVER is not presented as a new end-to-end RL algorithm for all flow-based VLAs. It is a \emph{training-time selective-verification layer}. Relative to ALOE, which studies action-level off-policy evaluation from logged VLA data, CAVER adds an online data-collection decision: it chooses which cheap candidate to verify in the first place, then uses that verified outcome to decide which executed trajectories deserve an update \citep{yang2026aloe}. Relative to WoVR and World-VLA-Loop, CAVER does not ask the world model to become increasingly reliable through policy/world co-training; it instead treats the world model as fallible and spends real interaction only where it is most valuable \citep{jiang2026wovr,liu2026worldvlaloop}. Relative to real-only post-training, it asks whether the same real budget can be used more intelligently. That is a concrete, testable, and publishable contribution.
+The claim is deliberately modest. CAVER is not presented as a new end-to-end RL algorithm for all flow-based VLAs. It is a \emph{training-time selective-verification layer}. Relative to ALOE, which studies action-level off-policy evaluation from logged VLA data, CAVER adds an online data-collection decision: it chooses which cheap candidate to verify in the first place, then uses that verified outcome to decide which executed trajectories deserve an update \citep{yang2026aloe}. Relative to WoVR and World-VLA-Loop, CAVER does not ask the world model to become increasingly reliable through policy/world co-training; it instead treats the world model as fallible and spends trusted interaction only where it is most valuable \citep{jiang2026wovr,liu2026worldvlaloop}. Relative to direct executed-trajectory post-training, it asks whether the same trusted budget can be used more intelligently.
 
 \paragraph{Contributions.}
 \begin{enumerate}
-    \item A \textbf{problem formulation} for VLA post-training under limited real verification, in which a frozen off-the-shelf world-model provider produces cheap predicted futures while real execution supplies the trusted label.
+    \item A \textbf{problem formulation} for VLA post-training under limited trusted verification, in which a frozen off-the-shelf world-model provider produces cheap predicted futures while trusted execution supplies the label.
     \item A \textbf{two-layer CAVER specification}: an interface-general method defined by an execution adapter, provider adapter, safety shield, and verified labeler, together with concrete Stage-0 LIBERO and Stage-1 PiPER instantiations.
-    \item A \textbf{roundwise selective-verification algorithm} with exact feature definitions, exact selector behavior, exact roundwise data flow, explicit frozen-vs-trainable components, and an implemented-path update backend.
+    \item A \textbf{roundwise selective-verification algorithm} with exact feature definitions, exact selector behavior, exact roundwise data flow, explicit frozen-vs-trainable components, failure-aware admission through CAVER+FASR, and an implemented-path update backend.
     \item A \textbf{reproducible implementation and current Stage-0 result} using $\pi_{0.5}$, GE-Sim, LIBERO, and $\pi$-StepNFT, together with a clearly delimited Stage-1 PiPER transfer plan.
 \end{enumerate}
 
-\subsection*{Positioning against the nearest neighboring methods}
+\section{Related work and positioning}\label{sec:related}
+CAVER sits at the intersection of four lines of work: executed-trajectory post-training for flow-based VLAs, world-model-assisted VLA learning, off-policy evaluation under limited trusted feedback, and safety-aware robot deployment. This section makes the comparison explicit because the method is an integration paper: the individual statistical and systems components are familiar, but the combination is targeted at a narrow gap in VLA post-training.
+
+\subsection{Executed-trajectory post-training for VLAs}
+A first family updates a VLA directly from executed trajectories. RIPT-VLA and action-chunked PPO variants use online execution feedback for policy improvement, while TGRPO applies group-relative policy optimization ideas to VLA fine-tuning \citep{tan2025riptvla,wang2025actionchunkppo,chen2025tgrpo}. These methods are important because they show that closed-loop post-training can improve manipulation policies, but they either require action likelihoods or critic/advantage machinery that is not the simplest route for a flow-matching backbone such as $\pi_{0.5}$. $\pi$RL directly addresses this issue by converting flow-based VLA generation into RL-compatible stochastic processes through Flow-Noise and Flow-SDE \citep{chen2025pirl}. CAVER deliberately does not compete as a new policy-gradient optimizer. It keeps the executed-update backend close to $\pi$-StepNFT, a critic- and likelihood-free method designed for flow-based VLAs, and asks whether better verification and admission can feed that same backend more useful records \citep{wang2026pistepnft,pistepnftrepo2026}.
+
+\subsection{World models as simulators, evaluators, and preference generators}
+A second family uses learned dynamics or video prediction models to obtain cheap scale. World-VLA-Loop co-trains a world model and VLA policy, while WoVR uses world models as reliable simulators for post-training and explicitly addresses hallucination and long-horizon error accumulation \citep{liu2026worldvlaloop,jiang2026wovr}. VLA-RFT similarly uses a data-driven world simulator with verified reward signals, and Sword studies robustness of world-model simulators under style and initial-state perturbations \citep{li2025vlarft,gao2026sword}. Other work uses world models primarily as evaluators: NORA-1.5 constructs preference data from world-model and action-based rewards, and Cosmos Policy exposes future-state value signals useful for planning-style scoring \citep{hung2025nora15,kim2026cosmospolicy}. CAVER is more conservative than these world-model-heavy approaches. It uses GE-Sim as a frozen provider for short-horizon features, but it does not treat imagined rollouts as ground truth and does not update the backbone directly from unverified provider futures. The trusted label still comes from LIBERO execution in Stage 0 or planned PiPER execution in Stage 1.
+
+\subsection{Off-policy evaluation, doubly robust correction, and high-confidence improvement}
+The statistical layer in CAVER draws from contextual-bandit and reinforcement-learning off-policy evaluation. Doubly robust estimators combine a direct model with inverse-propensity correction, and the RL extension of Jiang and Li shows why exact propensities plus a useful model can reduce variance relative to pure importance weighting \citep{dudik2011dr,jiang2016doubly}. High-confidence policy-improvement and safe policy-improvement methods add conservative decision rules around such estimates \citep{thomas2015hcpi,laroche2019spibb}. CAVER does not claim these estimators are new. Its use of DR is narrower: each decision context has a small menu of safety-approved candidate chunks, one candidate is sampled with an exact logged propensity, and the resulting trusted label is used to correct candidate-level utilities for the next admission/selection step. This is also distinct from ALOE, which frames VLA post-training as action-level off-policy evaluation from logged VLA chunks; CAVER adds the online or batch data-collection decision of which candidate to verify before execution \citep{yang2026aloe}.
+
+\subsection{Safety-aware VLA deployment and verified labels}
+Hardware VLA learning cannot rely only on objective functions. SAFE and SafeVLA motivate failure detection and constraint-aware deployment for VLA systems \citep{gu2025safe,zhang2025safevla}. CAVER's safety shield is not the algorithmic novelty, but it is essential for a fair and auditable real-robot study: every method shares the same deterministic pre-execution filter, runtime abort rules, and safety-abort accounting. This also clarifies the status of CAVER+FASR. FASR does not relabel failed episodes as successes. It admits only short progress-verified repair segments, and only when the progress labeler is reliable. If Stage-F PiPER shadow-mode checks cannot validate those progress labels, the hardware pilot falls back to strict CAVER.
+
+\subsection{Summary of closest neighbors}
 \begin{table}[H]
 \centering
 \small
-\caption*{What CAVER does relative to the closest neighboring VLA post-training papers}
-\begin{tabularx}{\linewidth}{@{}p{2.1cm}p{3.1cm}p{3.2cm}X@{}}
+\caption{Closest related methods and the specific gap CAVER targets. CAVER's claim is not that these ingredients are individually new; it is that a fixed-backend VLA post-training stack benefits from calibrated selective verification and explicit admission under a small trusted-execution budget.}
+\begin{tabularx}{\linewidth}{@{}p{2.3cm}p{3.3cm}p{3.2cm}X@{}}
 \toprule
-Method & Main object of optimization & How real data enters & What CAVER keeps or changes \\
+Method family & Representative methods & Primary learning signal & Difference from CAVER \\
 \midrule
-ALOE & Action-level off-policy evaluation / value estimation from logged VLA chunks \citep{yang2026aloe} & Logged executed data; no online verification-allocation rule & CAVER adds an online decision about \emph{which} cheap candidate to verify before execution, then uses the verified outcome to decide which executed trajectories deserve admission to training. \\
-$\pi$-StepNFT & Executed-trajectory post-training for flow-based VLAs without a critic or action likelihoods \citep{wang2026pistepnft} & Uses executed trajectories directly & CAVER keeps this backend fixed in the headline comparison and asks whether selective verification can feed it more informative executed data under the same real budget. \\
-$\pi$RL & RL backend for flow-based VLAs via Flow-Noise / Flow-SDE \citep{chen2025pirl} & Large online interaction or simulation for policy-gradient style RL & CAVER is not a replacement for $\pi$RL; it intentionally stays on the simpler executed-sample backend and targets minimal-verification post-training rather than a new RL optimizer. \\
-WoVR & World-model RL with imagined rollouts and hallucination control \citep{jiang2026wovr} & Real interaction plus many imagined rollouts & CAVER treats the world model as a frozen, fallible provider and asks how scarce verified real executions should be allocated, rather than how to optimize more aggressively inside the simulator. \\
+Executed-trajectory post-training & $\pi$-StepNFT, RIPT-VLA, TGRPO, action-chunked PPO, $\pi$RL \citep{wang2026pistepnft,tan2025riptvla,chen2025tgrpo,wang2025actionchunkppo,chen2025pirl} & Executed rollouts, group advantages, critic/likelihood machinery, or flow-specific RL & CAVER keeps the executed-sample backend fixed and changes only verification allocation and data admission. \\
+World-model-heavy post-training & WoVR, World-VLA-Loop, VLA-RFT, Sword \citep{jiang2026wovr,liu2026worldvlaloop,li2025vlarft,gao2026sword} & Imagined rollouts or learned simulator feedback & CAVER treats the provider as fallible; imagined futures provide features, not direct backbone training labels. \\
+World-model preference/evaluation & NORA-1.5, Cosmos Policy \citep{hung2025nora15,kim2026cosmospolicy} & Preference rewards or future-state values from a model & CAVER calibrates cheap scores against trusted outcomes and uses them for selection/admission rather than direct DPO or planning claims. \\
+Off-policy evaluation and safe improvement & ALOE, DR/OPE, HCPI, SPIBB \citep{yang2026aloe,dudik2011dr,jiang2016doubly,thomas2015hcpi,laroche2019spibb} & Logged data, propensities, value estimates, confidence bounds & CAVER applies this logic to VLA candidate menus and decides what to verify before execution. \\
+Safety-aware deployment & SAFE, SafeVLA \citep{gu2025safe,zhang2025safevla} & Failure detection or constraints & CAVER uses safety as a shared execution guardrail, not as the main learning contribution. \\
 \bottomrule
 \end{tabularx}
+\label{tab:related_work}
 \end{table}
 
 \section{Scope and explicit design choices}
 This section states the design choices that make the proposal both general at the method level and concrete at the implementation level.
 
 \subsection{What this paper is and is not}
-This is a \textbf{selective-verification paper}. It is not a full policy-gradient method for flow-based VLAs, it is not a new critic-learning paper, and it is not a world-model-training paper. The main contribution is also not doubly robust estimation by itself; that machinery is borrowed. The contribution claimed here is the \emph{integration}: exact-propensity online verification allocation plus conservative admission into an unchanged executed-sample backend under a strict matched-budget protocol. The paper asks whether a small verified real budget can be used to obtain better learning signal than either direct real-only post-training or direct imagined-experience training. Natural extensions such as a $\pi$RL-style Flow-SDE policy-gradient backend, learned online selector policies, or multi-provider disagreement modeling are future work rather than part of the present claim.
+This is a \textbf{selective-verification paper}. It is not a full policy-gradient method for flow-based VLAs, it is not a new critic-learning paper, and it is not a world-model-training paper. The main contribution is also not doubly robust estimation by itself; that machinery is borrowed. The contribution claimed here is the \emph{integration}: exact-propensity online verification allocation plus conservative/failure-aware admission into an unchanged executed-sample backend under a strict matched-budget protocol. In the current formulation, strict CAVER is the conservative base rule, and CAVER+FASR is the main Stage-0 empirical variant. The paper asks whether a small trusted-execution budget can produce a better learning signal than either direct executed-trajectory post-training or direct imagined-experience training. Natural extensions such as a $\pi$RL-style Flow-SDE policy-gradient backend, learned online selector policies, or multi-provider disagreement modeling are future work rather than part of the present claim.
+
+\begin{table}[H]
+\centering
+\small
+\caption*{Names of the CAVER variants used in this paper}
+\begin{tabularx}{\linewidth}{@{}p{3.2cm}p{4.2cm}X@{}}
+\toprule
+Variant & Admission rule & Role in the paper \\
+\midrule
+Strict CAVER & Admit only full successful executed trajectories whose lower confidence bound exceeds the threshold. & Conservative base rule and backend-data-efficiency ablation; not the strongest raw-success variant. \\
+CAVER+FASR & Preserve full successful trajectories and add only short verified-progress repair segments from failed episodes when the task progress label is reliable. & Main current Stage-0 empirical variant. It does not relabel whole failed episodes and does not change the backend objective. \\
+Uniform $K=4$ & Sample one of four safe candidates uniformly and admit every executed trajectory to the same backend. & Matched candidate-wrapper baseline. \\
+Vanilla $K=1$ & Sample and execute a single candidate without the $K=4$ wrapper. & Strong pressure-test baseline that must remain in the main comparison. \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 \subsection{What is general and what is instantiated}
 CAVER's scientific claim is not tied to PiPER-specific joint commands. At the method level, the pipeline is defined by four interfaces:
@@ -148,12 +227,12 @@ CAVER's scientific claim is not tied to PiPER-specific joint commands. At the me
 \qquad
  a \xrightarrow{\Phi_{\Omega}} \tilde a^{\Omega} \xrightarrow{\mathcal T_{\Omega}} \hat I \xrightarrow{V_{\omega},f_{\psi}} (\hat v,\hat\sigma,\mu,\sigma).
 \]
-Only four modules are robot- or simulator-specific: the execution adapter $\Gamma_{\mathrm{exec}}$, the safety shield $S_{\mathrm{safe}}$, the provider adapter $\Phi_{\Omega}$, and the verified labeler $M_{\mathrm{task}}$. The staged study instantiates them twice. In Stage 0, LIBERO supplies simulator execution, simulation-side candidate validity checks, a LIBERO-to-GE-Sim compatibility map, and the simulator task-success labeler. In Stage 1, PiPER supplies joint/gripper execution, a PiPER URDF-based safety shield, a PiPER-to-GE-Sim compatibility map, and a marker-based geometric labeler. Porting CAVER to another robot changes those modules and the local configs, but it does \emph{not} change selector scoring, exact propensity logging, doubly robust correction, calibrator fitting, or the StepNFT-style executed-update backend.
+Only four modules are robot- or simulator-specific: the execution adapter $\Gamma_{\mathrm{exec}}$, the safety shield $S_{\mathrm{safe}}$, the provider adapter $\Phi_{\Omega}$, and the verified labeler $M_{\mathrm{task}}$. The staged study instantiates them twice. In Stage 0, LIBERO supplies simulator execution, finite/shape/magnitude candidate validity checks, a LIBERO-to-GE-Sim compatibility map, and the simulator task-success labeler. In Stage 1, PiPER supplies joint/gripper execution, a PiPER URDF-based safety shield, a PiPER-to-GE-Sim compatibility map, and a marker-based geometric labeler. Porting CAVER to another robot changes those modules and the local configs, but it does \emph{not} change selector scoring, exact propensity logging, doubly robust correction, calibrator fitting, or the StepNFT-style executed-update backend.
 
 \subsection{Why the mainline uses an off-the-shelf world model}
 The mainline method uses a frozen off-the-shelf provider because this is the cleanest way to isolate the proposed contribution. A new world model would introduce another training problem, another set of hyperparameters, and another source of failure. GE-Sim is therefore the primary provider because its public repository includes released GE-Sim weights, an example inference path, and explicit instructions for passing images, camera intrinsics/extrinsics, and actions into the simulator \citep{genierepo2026}. The proposal also keeps a local lightweight provider only as a \emph{contingency}; see Appendix~\ref{app:contingency}. Replacing GE-Sim in a future study would change $\Phi_{\Omega}$ and the provider-specific input bundle, not the selective-verification logic itself. The paper therefore generalizes across interfaces, not by claiming that every robot stack is already validated empirically.
 
-\subsection{Why the update backend is executed-sample $\pi$-StepNFT}
+\subsection{Why the update backend is executed-sample \texorpdfstring{$\pi$-StepNFT}{pi-StepNFT}}
 Critic-free, likelihood-free fine-tuning is the most direct practical route on $\pi_{0.5}$, and the public ecosystem supports that route. The open-source $\pi$-StepNFT code is public and is already framed as a critic-and-likelihood-free method for flow-based VLAs \citep{wang2026pistepnft,pistepnftrepo2026}. This proposal therefore uses the released $\pi$-StepNFT objective as the real-only baseline and as the backbone-update backend inside CAVER. In the main comparison, CAVER keeps the StepNFT loss, optimizer, LoRA target modules, batch size, gradient clip, and update schedule unchanged. It differs only in how candidate chunks are scored before execution, which executed contexts are admitted to training, and which exact propensities are logged for doubly robust correction.
 
 \subsection{How the selector is fixed yet still improves over rounds}
@@ -162,9 +241,11 @@ The \textbf{selector functional form is frozen after Stage 0}. Its scalar coeffi
 \subsection{Frozen features and trainable components}
 The cheap-feature space does \textbf{not} move while the policy is being updated. The encoders used to build $e_{r,c}$, $q_{r,c,k}$, and therefore $z_{r,c,k}$ are frozen throughout Stage 1. Only LoRA modules are updated inside the action head used for the final policy improvement. Here \emph{LoRA} means \emph{low-rank adaptation}: small trainable low-rank matrices are inserted into a frozen pretrained network so that most original weights remain fixed.
 
-\section{Problem setup, notation, and repeated terms}
+\section{Problem setup and notation}
+This section introduces symbols, but the operational idea is simple. A run is split into rounds. In each decision context, the policy proposes a few short action chunks, CAVER selects one safe chunk to verify, and the outcome is used after the round to update the calibrator and possibly the policy backend. The long notation table is a reference table; first-time readers can skip it and use the plain-language guide above.
+
 \subsection{Roundwise decision process}
-Training proceeds in rounds $r=1,2,\dots,R$. \textbf{Each Stage-0 and Stage-1 online training run is task-specific}: one run fine-tunes one copy of the common seed-warmed checkpoint on exactly one task, and all reported task averages are formed only after those per-task runs finish. A \textbf{decision context} is a chunk boundary inside an episode, not an individual low-level control step. Each episode allows at most four decision contexts.
+Training proceeds in rounds $r=1,2,\dots,R$. In the planned Stage-1 PiPER study, each online training run is task-specific: one run fine-tunes one copy of the common seed-warmed checkpoint on exactly one physical task, and task averages are formed only after those per-task runs finish. The completed Stage-0 LIBERO experiments instead use balanced multi-family proxy runs so that one simulation run can cover all five proxy families under a shared budget curve. A \textbf{decision context} is a chunk boundary inside an episode, not an individual low-level control step. Each episode allows at most four decision contexts.
 
 A \textbf{round} is operationally fixed to
 \[
@@ -174,7 +255,7 @@ B_{\mathrm{round}}=25
 \[
 R=N/B_{\mathrm{round}}\in\{1,2,4,8\}
 \]
-rounds and there is no partial final round in the main experiments. Within one round, the backbone policy $\pi_{\theta_r}$, the selector $\nu_r$, the lagged nuisance model $m_{r-1}$, and the safety shield are frozen. Only after the round closes are the calibrator and, if triggered, the LoRA modules updated.
+rounds and there is no partial final round in the main experiments. Within one round, the backbone policy $\pi_{\theta_r}$, the selector $\nu_r$, the previous-round prediction model $m_{r-1}$, and the safety shield are frozen. Only after the round closes are the calibrator and, if triggered, the LoRA modules updated.
 
 This roundwise convention makes the theory--protocol link explicit. The potential outcome $Y_{r,c}(k)\in\{0,1\}$ means the eventual episode-success label that would be observed in round $r$ if candidate $k$ were executed at context $c$ and the remainder of the episode were completed by the frozen continuation policy $\pi_{\theta_r}$. The observed label is $Y_{r,c}=Y_{r,c}(A_{r,c})$.
 
@@ -185,23 +266,26 @@ The method itself is written around two deterministic translation steps and two 
 \qquad
  a_{r,c,k}\xrightarrow{\Phi_{\Omega}} \tilde a^{\Omega}_{r,c,k}\xrightarrow{\mathcal T_{\Omega}} \hat I_{r,c,k,1:H}.
 \]
-The first map, $\Gamma_{\mathrm{exec}}$, turns raw backbone outputs into a safety-checkable execution-space chunk for the chosen trusted execution environment. The second map, $\Phi_{\Omega}$, turns that same execution chunk into the frozen provider's conditioning format. The trust layers are (i) the hard safety shield $S_{\mathrm{safe}}$, which determines which candidates may be executed at all, and (ii) the verified labeler $M_{\mathrm{task}}$, which turns the executed episode into a trusted binary outcome. In the present study, Stage 0 instantiates these modules with a LIBERO execution adapter, simulation-side validity checks, a LIBERO-to-GE-Sim compatibility map, and the simulator task labeler; Stage 1 instantiates them with a PiPER joint/gripper adapter, a PiPER-to-GE-Sim compatibility map, a PiPER URDF-based hard filter, and a marker-based geometric labeler. The selector, DR correction, calibrator, and StepNFT-style update backend do not depend on which concrete robot or simulator instantiates those four modules.
+The first map, $\Gamma_{\mathrm{exec}}$, turns raw backbone outputs into a safety-checkable execution-space chunk for the chosen trusted execution environment. The second map, $\Phi_{\Omega}$, turns that same execution chunk into the frozen provider's conditioning format. The trust layers are (i) the hard safety shield $S_{\mathrm{safe}}$, which determines which candidates may be executed at all, and (ii) the verified labeler $M_{\mathrm{task}}$, which turns the executed episode into a trusted binary outcome. In the present study, Stage 0 instantiates these modules with a LIBERO execution adapter, simulator-side validity checks for finite tensors, expected chunk shape, and broad action magnitude bounds, a LIBERO-to-GE-Sim compatibility map, and the simulator task labeler; Stage 1 instantiates them with a PiPER joint/gripper adapter, a PiPER-to-GE-Sim compatibility map, a PiPER URDF-based hard filter, and a marker-based geometric labeler. The selector, DR correction, calibrator, and StepNFT-style update backend do not depend on which concrete robot or simulator instantiates those four modules.
 
-\subsection{Master notation table}
+\subsection{Reference notation table}
 {\footnotesize
+\refstepcounter{table}\label{tab:master_notation}
+\noindent\textbf{Table~\thetable.} Reference notation table used throughout the proposal. It is included for auditability; it is not required for a first pass through the method.
+\par\smallskip
 \setlength{\LTleft}{0pt}
 \setlength{\LTright}{0pt}
-\begin{longtable}{@{}p{2.2cm}p{2.9cm}p{9.7cm}@{}}
-\caption{Master notation table used throughout the proposal.\label{tab:master_notation}}\\
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.25cm}>{\raggedright\arraybackslash}p{2.55cm}>{\raggedright\arraybackslash}p{8.35cm}@{}}
 \toprule
 Symbol & Name & Exact meaning in this proposal \\
 \midrule
 \endfirsthead
+\multicolumn{3}{@{}l@{}}{\emph{Table~\thetable{} continued.}}\\
 \toprule
 Symbol & Name & Exact meaning in this proposal \\
 \midrule
 \endhead
-$r$ & round index & One online collection-and-update block of exactly $B_{\mathrm{round}}=25$ counted training contexts on a single task. \\
+$r$ & round index & One collection-and-update block of exactly $B_{\mathrm{round}}=25$ counted training contexts. Stage 1 is task-specific; completed Stage 0 uses balanced multi-family proxy manifests. \\
 $c$ & context index & Decision-context index within the current round and episode. \\
 $B_{\mathrm{round}}$ & round size & Fixed at 25 counted training contexts per round in both Stage 0 and Stage 1. \\
 $h_{r,c}$ & observation bundle & Policy-view observations, optional provider-only auxiliary views, robot state, and any calibration metadata required by the concrete instantiation. \\
@@ -211,7 +295,7 @@ $e_{r,c}$ & frozen context embedding & Context embedding produced by the frozen 
 $E_{\phi}^{\mathrm{frz}}$ & frozen context encoder & The frozen $\pi_{0.5}$ context encoder used to form $e_{r,c}$ and start-state embeddings. \\
 $\pi_{\theta_r}$ & backbone policy & Frozen $\pi_{0.5}$ backbone used during data collection of round $r$. \\
 $\theta_{\mathrm{roll}}$ & rollout checkpoint & Frozen policy parameters that originally generated the executed trajectories currently being optimized by StepNFT. \\
-$K$ & candidates per context & Fixed at $K=4$ in all main experiments. \\
+$K$ & candidates per context & Fixed at $K=4$ for CAVER and the matched uniform baseline; vanilla $K=1$ is reported as a stricter real-only baseline. \\
 $H$ & chunk horizon & Fixed at $H=4$ executed commands per candidate chunk. \\
 $\Delta t$ & control interval & Fixed at $\Delta t=0.1$ s, i.e. 10 Hz chunk execution. \\
 $d_{\mathrm{exec}}$ & execution dimension & Per-step dimension of one execution-space command after $\Gamma_{\mathrm{exec}}$; the current study uses $d_{\mathrm{exec}}=7$. \\
@@ -238,7 +322,7 @@ $\hat \sigma^{\mathrm{pre}}_{r,c,k}$ & proxy uncertainty & Standard deviation ac
 $\mathcal D_{\mathrm{seed}}$ & warm-start seed set & The fixed fully verified set used before round 1 to create the common seed-warmed checkpoint and fit CAVER's initial calibrator $f_{\psi_0}$. \\
 $f_{\psi_0}$ & initial calibrator & Calibrator fit once on $\mathcal D_{\mathrm{seed}}$ before round 1; later rounds refit $f_{\psi_r}$. \\
 $\mathcal I_V$ & proxy-training index set & All Stage-0 train-split tuples plus the shared seed-real tuples used to fit the utility head. \\
-$\mathcal T^{\mathrm{seed}}_{\mathrm{S0}},\mathcal T^{\mathrm{train}}_{\mathrm{S0}},\mathcal T^{\mathrm{val}}_{\mathrm{S0}},\mathcal T^{\mathrm{test}}_{\mathrm{S0}}$ & Stage-0 partitions & Disjoint Stage-0 seed, training, validation, and audit-test template lists defined once before any tuning. \\
+\(\mathcal T^{\mathrm{seed}}_{\mathrm{S0}}\), \(\mathcal T^{\mathrm{train}}_{\mathrm{S0}}\), \(\mathcal T^{\mathrm{val}}_{\mathrm{S0}}\), \(\mathcal T^{\mathrm{test}}_{\mathrm{S0}}\) & Stage-0 partitions & Disjoint Stage-0 seed, training, validation, and audit-test template lists defined once before any tuning. \\
 $J_{\mathrm{S0}}$ & selector-selection score & Scalar Stage-0 model-selection score used only to choose frozen selector coefficients. \\
 $b_{r,c,k}$ & base feature vector & Cheap feature vector before novelty is appended. \\
 $\mathcal B_{\mathrm{hist}}$ & executed-history reservoir & FIFO reservoir of executed base features used for novelty. \\
@@ -249,34 +333,41 @@ $s_{r,c,k}$ & selector score & Pre-softmax frozen-form selector score for candid
 $\nu_r(k\mid c)$ & verification selector & Frozen-form stochastic selector over the $K$ candidates in round $r$. \\
 $p_{r,c,k}$ & propensity & Exact logged selection probability $\nu_r(k\mid c)$. \\
 $\mathcal K^{\mathrm{safe}}_{r,c}$ & safe candidate set & Indices of candidates that pass the deterministic pre-execution safety shield. \\
-$m_{r-1}(z)$ & lagged nuisance model & Cheap utility estimate available before round $r$ begins. \\
+$m_{r-1}(z)$ & previous-round prediction model & Cheap utility estimate available before round $r$ begins; in statistics this is often called a nuisance model. \\
 $\tilde y^{\mathrm{DR}}_{r,c,k}$ & DR pseudo-outcome & Doubly robust corrected utility target for candidate $k$. \\
 $\mathcal D^{\mathrm{tuple}}_{\le r}$ & accumulated tuple set & All non-aborted candidate tuples from verified contexts up to and including round $r$. \\
-$f_{\psi_r}$ & calibrator & Mean/scale predictor refitted after collecting round-$r$ real data. \\
-$\mu_r(z),\sigma_r(z)$ & corrected utility & The calibrator's corrected mean and heteroscedastic scale. \\
+$f_{\psi_r}$ & calibrator & Mean/scale predictor refitted after collecting round-$r$ trusted execution data. \\
+$\mu_r(z),\sigma_r(z)$ & corrected utility & The calibrator's corrected mean and input-dependent uncertainty scale. \\
 $\bar\mu_r(z)$ & clipped probability diagnostic & $\bar\mu_r(z)=\mathrm{clip}(\mu_r(z),0,1)$ used only for probability-style metrics. \\
 $\LCB_r(z)$ & conservative utility & $\mu_r(z)-\kappa\sigma_r(z)$. \\
-$\mathcal M_{\le r}^{+},\mathcal M_{\le r}^{-},\mathcal M_{\le r}^{0}$ & cumulative buffers & Positive, negative, and abstain executed-trajectory buffers used from rounds $1{:}r$. \\
+\(\mathcal M_{\le r}^{+}\), \(\mathcal M_{\le r}^{-}\), \(\mathcal M_{\le r}^{0}\) & cumulative buffers & Positive, negative, and abstain executed-trajectory buffers used from rounds $1{:}r$. \\
+$\mathcal M_{\le r}^{\mathrm{rep}}$ & FASR repair buffer & Verified-progress prefix segments from failed episodes; empty when running strict CAVER. \\
 $\mathcal P_{\le r}$ & cumulative pair set & Positive--negative trajectory pairs built from the cumulative buffers after round $r$. \\
+$q_f(t)$ & task progress label & Continuous progress score for task family $f$ at step or chunk index $t$, measured by the trusted environment rather than GE-Sim. \\
+$t^*,\Delta q^*$ & FASR endpoint/gain & Best verified-progress prefix endpoint and its progress gain relative to the start of the failed episode. \\
+$\mathcal F_{\mathrm{hard}}$ & FASR-eligible families & Task families where failed episodes may contain useful verified-progress prefixes. \\
+$\delta_{\mathrm{prog}},\delta_{\mathrm{reg}}$ & FASR gates & Minimum required progress gain and maximum allowed pre-endpoint regression for repair admission. \\
 $z^{\mathrm{exec}}_{r,c}$ & evaluation feature & Method-agnostic executed feature vector used by the common post-hoc calibration predictor. \\
 $g_{\mathrm{eval}}$ & diagnostic predictor & Common post-hoc probability predictor used only to compute cross-method Brier/ECE. \\
-$N_{\mathrm{val}}^{\mathrm{ctx}},N_{\mathrm{test}}^{\mathrm{ctx}}$ & evaluation interaction counts & Real decision-context counts consumed by validation and test episodes. \\
-$N_{\mathrm{total}}$ & total real interaction count & $120+N+N_{\mathrm{val}}^{\mathrm{ctx}}+N_{\mathrm{test}}^{\mathrm{ctx}}$. \\
+$N_{\mathrm{val}}^{\mathrm{ctx}},N_{\mathrm{test}}^{\mathrm{ctx}}$ & evaluation interaction counts & Decision-context counts consumed by validation and test episodes; these are simulated in Stage 0 and real on PiPER in Stage 1. \\
+$N_{\mathrm{total}}$ & total Stage-1 real interaction count & $120+N+N_{\mathrm{val}}^{\mathrm{ctx}}+N_{\mathrm{test}}^{\mathrm{ctx}}$ for the PiPER study. \\
 $\mathrm{StdNorm}(\cdot)$ & standardizer & Per-dimension $z$-score normalization using Stage-0 train-split statistics only. \\
 $\mathrm{vec}(\cdot)$ & vectorizer & Row-major flattening of one $H\times d_{\mathrm{exec}}$ action chunk into a length-$Hd_{\mathrm{exec}}$ vector. \\
 $\mathrm{NN}_1(\cdot;\mathcal B)$ & nearest neighbor & Euclidean nearest-neighbor query in buffer $\mathcal B$ with lexicographic tie breaking. \\
 \bottomrule
 \end{longtable}
 }
-\subsection{Two tiny glossaries}
-\textbf{Core method terms.} A \emph{VLA} is a vision-language-action model that maps images, language, and robot state to action chunks. A \emph{flow-based} or \emph{flow-matching} action head generates an action chunk by integrating a learned denoising or velocity field rather than by directly emitting a tractable likelihood for the final action. The \emph{execution space} is the robot-side command space after the deterministic adapter $\Gamma_{\mathrm{exec}}$; the \emph{provider space} is the conditioning format used by the frozen world-model provider after $\Phi_{\Omega}$. A \emph{nuisance model} is a predictor used inside a doubly robust estimator; it need not be perfect, but it should be available before the current real outcome is seen. A \emph{bootstrap head} means one head in a small ensemble trained with independent Bernoulli masks to estimate uncertainty. A \emph{heteroscedastic scale} is an input-dependent predicted standard deviation rather than one global constant.
+\subsection{Glossary of terms}
+\textbf{Core method terms.} A \emph{VLA} is a vision-language-action model that maps images, language, and robot state to action chunks. A \emph{flow-based} or \emph{flow-matching} action head generates an action chunk by integrating a learned denoising or velocity field rather than by directly emitting a tractable likelihood for the final action. The \emph{execution space} is the robot-side command space after the deterministic adapter $\Gamma_{\mathrm{exec}}$; the \emph{provider space} is the conditioning format used by the frozen world-model provider after $\Phi_{\Omega}$. A \emph{previous-round prediction model} is the value estimate available before the current round's outcomes are seen; DR estimators often call this a nuisance model. A \emph{bootstrap head} means one head in a small ensemble trained with independent Bernoulli masks to estimate uncertainty. An \emph{uncertainty scale} is a predicted standard deviation that can change with the input, rather than one global constant.
 
 \textbf{Software names.} \emph{PiPER} is the AgileX single-arm manipulation platform used in the current real study. \emph{GE-Sim} is the released short-horizon predictor in the Genie Envisioner repository. \emph{RLinf} is the public embodied-RL framework used to run the WoVR baseline. \emph{WoVR} is a world-model-heavy VLA post-training method that uses imagined rollouts as the main learning signal. \emph{URDF} stands for \emph{Universal Robot Description Format}, the kinematic model file used for forward kinematics and collision checking. A \emph{FIFO} reservoir is a \emph{first-in-first-out} buffer that evicts the oldest entry when full. \emph{GELU} is the Gaussian Error Linear Unit activation. \emph{AdamW} is Adam with decoupled weight decay.
 
 \section{Method}
 
-\subsection{Step 1: candidate generation from the current $\pi_{0.5}$ backbone}
+\subsection{Step 1: candidate generation from the current \texorpdfstring{$\pi_{0.5}$}{pi0.5} backbone}
 The backbone is the pretrained $\pi_{0.5}$ flow-based VLA from \texttt{openpi} \citep{pi052025,openpi2026repo}. At each decision context, CAVER receives one observation bundle $h_{r,c}$ together with the task language string $g_{r,c}$. The bundle may contain policy-view images, provider-only auxiliary views, robot state, and any camera or sensor metadata required by the concrete instantiation. The method does \emph{not} require those modalities to match across robots; it requires only that the backbone can sample raw candidate chunks from $(h_{r,c},g_{r,c})$ and that the current execution adapter can deterministically convert them into safety-checkable commands.
+
+In plain terms, this step creates the menu of options. At one decision context, the policy does not commit to the first sampled action. It samples $K$ short chunks, converts each into the current robot or simulator command format, and keeps the exact commands for scoring, safety checks, and logging.
 
 Generate $K=4$ candidate chunks by querying the same round-$r$ backbone with different sampling seeds:
 \[
@@ -304,6 +395,8 @@ The mainline provider is a frozen off-the-shelf short-horizon predictor $\mathca
 \tilde a^{\Omega}_{r,c,k}=\Phi_{\Omega}(a_{r,c,k})\in\mathbb R^{H\times d_{\Omega}}.
 \]
 At the method level, $\Phi_{\Omega}$ is whatever deterministic map makes the frozen provider consumable. The current study instantiates $\mathcal T_{\Omega}$ with GE-Sim and $\Phi_{\Omega}$ with a PiPER-to-GE-Sim compatibility map defined later in the concrete implementation section.
+
+In plain terms, the provider is a cheap preview system. It predicts what might happen for each candidate, but CAVER does not trust that preview as truth. The preview is only one feature used before the real or simulated execution label is observed.
 
 The provider call is written abstractly as
 \[
@@ -395,9 +488,11 @@ z_{r,c,k}=[b_{r,c,k},N_{r,c,k}].
 This removes the recursion completely.
 
 \subsection{Step 4: frozen-form stochastic selector with refreshed calibrated inputs}
-Before round 1 begins, CAVER fits one \emph{initial} calibrator $f_{\psi_0}$ on a fully verified warm-start set $\mathcal D_{\mathrm{seed}}$ using the same heteroscedastic loss as later rounds. In Stage 1, $\mathcal D_{\mathrm{seed}}$ is the shared 120-context PiPER seed set. In Stage 0 simulation sweeps, $\mathcal D_{\mathrm{seed}}$ is a matched simulated seed set of 120 fully verified contexts, balanced as 24 contexts per Stage-0 task. Round 1 therefore \emph{does} start with a learned calibrator; there is no raw-proxy-only special case in the main protocol.
+Before round 1 begins, CAVER fits one \emph{initial} calibrator $f_{\psi_0}$ on a fully verified warm-start set $\mathcal D_{\mathrm{seed}}$ using the same mean-and-uncertainty loss as later rounds. In Stage 1, $\mathcal D_{\mathrm{seed}}$ is the shared 120-context PiPER seed set. In Stage 0 simulation sweeps, $\mathcal D_{\mathrm{seed}}$ is a matched simulated seed set of 120 fully verified contexts, balanced as 24 contexts per Stage-0 task. Round 1 therefore \emph{does} start with a learned calibrator; there is no raw-proxy-only special case in the main protocol.
 
-At the start of round $r$, use the lagged calibrator from the previous round:
+In plain terms, the selector is a fixed scoring recipe. It prefers candidates with high calibrated value, useful uncertainty, diversity, novelty, and some exploration. The recipe is tuned in Stage 0 and then frozen; only the calibrated inputs are refreshed as more verified outcomes arrive.
+
+At the start of round $r$, use the calibrator from the previous round:
 \[
 \bar v_{r,c,k}=\mu_{r-1}(z_{r,c,k}),
 \qquad
@@ -461,9 +556,11 @@ M_{\mathrm{task}}(\text{executed episode trace})\in\{0,1\}
 \]
 shared across methods, optionally together with a diagnostic continuous progress score $\bar Y_{r,c}\in[0,1]$. In the current study, $M_{\mathrm{task}}$ is a marker-based geometric end-state checker for three PiPER tasks with a fixed human-audit path for low-confidence marker tracks; the exact thresholds, audit triggers, and geometric rules are pinned in the concrete implementation section and appendix. The important method-level point is that the labeler is deterministic, auditable, and shared across CAVER, real-only $\pi$-StepNFT, and WoVR when they are evaluated on real execution.
 
-\subsection{Step 6: lagged doubly robust correction}
+\subsection{Step 6: correcting candidate scores with logged probabilities}
 
-The online implementation uses a lagged nuisance model to avoid same-round leakage. Before round $r$ begins, define
+This is the only statistically specialized step. Because CAVER executes only one candidate, it cannot directly observe the outcomes of the other $K-1$ candidates. The DR correction uses the exact logged selection probability to build a corrected target for every safe candidate. If the prediction model is imperfect, the observed executed outcome still corrects it in expectation.
+
+The online implementation uses a previous-round prediction model to avoid same-round leakage. Before round $r$ begins, define
 \[
 m_{r-1}(z)=\mu_{r-1}(z),\qquad r\ge 1,
 \]
@@ -471,7 +568,7 @@ where $\mu_0$ is the initial calibrator mean fit on the warm-start seed set $\ma
 \[
 \tilde y^{\mathrm{DR}}_{r,c,k}=m_{r-1}(z_{r,c,k})+\frac{\I\{A_{r,c}=k\}}{p_{r,c,k}}\big(Y_{r,c}-m_{r-1}(z_{r,c,k})\big).
 \]
-Because $m_{r-1}$ is measurable with respect to the history available before round $r$, this is the sequential version of the usual doubly robust correction and keeps the online algorithm single-pass. For retrospective diagnostics on the accumulated dataset, the codebase will also report a 5-fold cross-fitted estimate whose nuisance family is exactly the same width-256 2-layer GELU MLP used for the online calibrator; each fold trains on 80\% of the tuples and predicts the held-out 20\%.
+Because $m_{r-1}$ is measurable with respect to the history available before round $r$, this is the sequential version of the usual doubly robust correction and keeps the online algorithm single-pass. For retrospective diagnostics on the accumulated dataset, the codebase will also report a 5-fold cross-fitted estimate whose prediction family is exactly the same width-256 2-layer GELU MLP used for the online calibrator; each fold trains on 80\% of the tuples and predicts the held-out 20\%.
 
 Fit a calibrator after collecting round-$r$ data:
 \[
@@ -495,11 +592,13 @@ For probability-style diagnostics, define a clipped score
 \]
 Whenever the proposal reports Brier score or ECE for CAVER's \emph{online} calibration signal, it uses $\bar\mu_r(z_{r,c,A_{r,c}})$ on the executed candidate only. Cross-method Brier/ECE comparisons use the common post-hoc diagnostic described in the experimental section so that real-only and WoVR are also well defined.
 
-\subsection{Step 7: confident executed updates only}
+\subsection{Step 7: failure-aware admission into the unchanged backend}
 Define the conservative utility
 \[
 \LCB_r(z)=\mu_r(z)-\kappa\sigma_r(z).
 \]
+In plain terms, LCB is a cautious score: predicted value minus an uncertainty penalty. A trajectory can succeed online but still be withheld from backend training if CAVER is not confident that it is a useful positive update.
+
 Every executed trajectory is placed into exactly one cumulative buffer:
 \[
 \mathcal M_{\le r}^{+}
@@ -519,13 +618,47 @@ Every executed trajectory is placed into exactly one cumulative buffer:
 \mathcal M_{< r}^{0}\cup
 \big\{\tau_{r,c}:Y_{r,c}=1\ \text{and}\ 0<\LCB_r(z_{r,c,A_{r,c}})\le\tau\big\}.
 \]
-Thus successful samples with $0<\LCB_r\le\tau$ are assigned to an explicit \emph{abstain} region. They are kept for calibrator fitting but are never used as positives or negatives in the backbone update.
+Thus successful samples with $0<\LCB_r\le\tau$ are assigned to an explicit \emph{abstain} region. They are kept for calibrator fitting but are never used as positives or negatives in the backbone update. This LCB-only rule is the \emph{strict CAVER} admission rule.
+
+\paragraph{CAVER+FASR main admission rule.}
+FASR means \emph{failure-aware segment repair}. It is the main Stage-0 empirical admission rule and a conservative extension of strict CAVER, not a different policy backend. Strict CAVER admits only confident full successful trajectories. CAVER+FASR keeps that rule for successful executions and adds a second, explicitly limited path for failed episodes: a failed episode may contribute only a short \emph{prefix segment} if the logged state trace verifies local task progress. The whole failed episode is never relabeled as successful.
+
+Formally, let $q_f(t)$ be the task-family progress value at primitive step or chunk index $t$ for family $f$, computed from the trusted execution environment rather than from GE-Sim. For a failed, non-aborted context, define
+\[
+t^*=\argmax_{t\ge t_{\min}} q_f(t),\qquad \Delta q^*=q_f(t^*)-q_f(0).
+\]
+The segment $\tau[0:t^*]$ is eligible for FASR only if
+\[
+Y=0,\quad f\in\mathcal F_{\mathrm{hard}},\quad \Delta q^*\ge \delta_{\mathrm{prog}},\quad
+\min_{0\le t\le t^*} (q_f(t)-q_f(0))\ge -\delta_{\mathrm{reg}},
+\]
+with no context error and no safety abort. The current Stage-0 implementation uses $\mathcal F_{\mathrm{hard}}=\{$two-object stack, drawer/handle open, relocate-to-region$\}$ when those families are under-covered, $\delta_{\mathrm{prog}}=0.03$, $t_{\min}=4$ primitive steps, $\delta_{\mathrm{reg}}=0.10$, and at most 12 chunk records from a repaired failed context. Eligible repairs are ranked by verified progress gain, then by the executed LCB and value tie-breakers, and only the capped number required by the family quota is added to the policy-imitation buffer.
+
+\begin{table}[H]
+\centering
+\small
+\caption{FASR eligibility parameters in the completed Stage-0 implementation. These parameters are not assumed valid on PiPER until the Stage-F progress-label gate passes.\label{tab:fasr_params}}
+\begin{tabularx}{\linewidth}{@{}p{3.0cm}p{3.6cm}X@{}}
+\toprule
+Parameter & Stage-0 value & Meaning \\
+\midrule
+$\mathcal F_{\mathrm{hard}}$ & stack, drawer/handle open, relocate-to-region & Families where failed episodes often contain useful partial progress. \\
+$\delta_{\mathrm{prog}}$ & 0.03 & Minimum verified progress gain required before a failed prefix can be considered. \\
+$t_{\min}$ & 4 primitive steps & Earliest endpoint considered for a repair prefix. \\
+$\delta_{\mathrm{reg}}$ & 0.10 & Maximum allowed regression before the selected repair endpoint. \\
+Repair cap & 12 chunk records per repaired context & Prevents a failed episode from dominating the positive-update buffer. \\
+Ranking rule & progress gain, then LCB/value tie-breakers & Chooses among eligible repair prefixes when the quota is binding. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The extra assumption introduced by FASR is explicit: each task must expose a reliable progress measurement for short segments. In Stage 0, LIBERO provides object poses and simulator state, so progress can be computed geometrically. In Stage 1, PiPER must validate the same idea through marker-based or geometric progress checks before CAVER+FASR can be used as the primary hardware variant. If progress labels are unreliable on a task, the study falls back to strict CAVER for that task. This is why the FASR result remains a selective-admission result: FASR changes which executed records enter the unchanged backend, not the backend objective itself.
 
 \paragraph{Negative pairing rule.}
 For every positive trajectory $\tau^+\in\mathcal M_{\le r}^{+}$, choose one negative trajectory $\tau^-\in\mathcal M_{\le r}^{-}$ from the same task whose start-state embedding is nearest in cosine distance to the positive start-state embedding. Start-state embeddings are extracted from the frozen context encoder $E_{\phi}^{\mathrm{frz}}$ before any LoRA adaptation is applied. If no same-task negative exists, use the nearest negative from any task but record that fallback event in the logs. Negative reuse is \emph{allowed}: one negative trajectory may be paired with multiple positives within the same update block or across rounds. Under fixed random seeds, pair construction is deterministic: positives are processed in ascending global trajectory ID, cosine-distance ties are broken by ascending negative trajectory ID, and the same cumulative buffers therefore yield the same pair set $\mathcal P_{\le r}$. The real-only baseline uses the same pair-construction rule on its admitted executed trajectories.
 
 \paragraph{Backbone update with the explicit $\pi$-StepNFT objective.}
-Let a matched positive--negative pair be denoted $(\tau^+,\tau^-)$. This proposal keeps the \emph{mirrored-branch ranking form} of $\pi$-StepNFT but pins the previously implicit backend details in-text so the study is reproducible without consulting external code.
+Let a matched positive--negative pair be denoted $(\tau^+,\tau^-)$. The full proposal-mainline backend keeps the \emph{mirrored-branch ranking form} of $\pi$-StepNFT and pins the previously implicit backend details in-text so the Stage-1 study is reproducible without consulting external code. The completed Stage-0 results above used the implemented exact offline rollout-batch backend; they should be read as Stage-0 evidence for selective admission and provider-aware allocation, not as evidence that the full mirrored-pair backend has already been validated on PiPER.
 
 \paragraph{Pinned solver transition sampler.}
 Every executed chunk stores the 51 solver states $\{x_0,\dots,x_{50}\}$ produced by the local \texttt{pi05\_piper\_h4} flow solver over normalized solver time $t\in\{0,\dots,49\}$ with $\Delta_s=1/50$ and one-step successor notation $x_{t^-}:=x_{t+1}$. For every optimizer epoch and every pair $(\tau^+,\tau^-)$, define $\mathcal S(\tau^+,\tau^-)$ by sampling exactly 8 transition tuples with replacement: 4 tuples from $\tau^+$ and 4 tuples from $\tau^-$. Within each chosen trajectory, sample the solver index uniformly,
@@ -586,19 +719,19 @@ L_{\mathrm{PT}}(\theta)=\frac{1}{|\mathcal P_{\le r}|}\sum_{(\tau^+,\tau^-)\in\m
 \paragraph{Pinned optimizer and trainable modules.}
 The backbone optimizer is AdamW with learning rate $10^{-5}$, betas $(0.9,0.999)$, weight decay $10^{-4}$, gradient clip 1.0, batch size 16 positive--negative pairs, and exactly 500 gradient steps whenever an update is triggered. The common seed warm-start pass also uses exactly 500 gradient steps with the same optimizer and no early stopping. LoRA is inserted \emph{only} into the action-head denoising transformer blocks: the trainable linear projections are $\{q\_proj,k\_proj,v\_proj,out\_proj,fc1,fc2\}$ in every action-head block, with LoRA rank 16, scale $\alpha=32$, and dropout 0. No LoRA modules are attached to the vision tower, language tower, frozen context encoder, provider, proxy head, or calibrator.
 
-The mainline backend therefore keeps the StepNFT-style mirrored-branch ranking loss and identical optimizer settings for CAVER and the real-only baseline. CAVER does not alter the backbone objective in the headline comparison. The only mainline difference between CAVER and the real-only baseline is \emph{which executed examples reach this unchanged trainer}. A conservative weighted variant is evaluated separately as an ablation.
+The Stage-1 mainline backend therefore keeps the StepNFT-style mirrored-branch ranking loss and identical optimizer settings for CAVER and the trusted-execution-only baseline. CAVER does not alter the backbone objective in the headline comparison. The only mainline difference is \emph{which executed examples reach this unchanged trainer}. A conservative weighted variant is evaluated separately as an ablation.
 
 \paragraph{When an update is skipped.}
 If $|\mathcal M_{\le r}^{+}|<8$, the code performs \emph{no} backbone update after round $r$. This is the concrete meaning of ``accumulate more data'': the current round still enlarges $\mathcal M_{\le r}^{+}$, $\mathcal M_{\le r}^{-}$, and $\mathcal M_{\le r}^{0}$, but the LoRA optimizer is not called until at least eight cumulative positives exist. Only LoRA modules inside the action head are updated by $L_{\mathrm{PT}}$. The encoders used to form $z_{r,c,k}$ stay frozen.
 
 \subsection{Algorithm summary}
 \begin{algorithm}[H]
-\caption{CAVER}
+\caption{CAVER+FASR: roundwise selective verification and failure-aware admission}
 \begin{algorithmic}[1]
 \State Initialize the common seed-warmed backbone $\pi_{\theta_1}$ from the shared seed set $\mathcal D_{\mathrm{seed}}$, frozen provider $\mathcal T_{\Omega}$, deterministic adapters $\Gamma_{\mathrm{exec}},\Phi_{\Omega}$, frozen future encoder $F_{\rho}^{\mathrm{frz}}$, and Stage-0-trained proxy head $V_{\omega}$.
 \State Fit the initial calibrator $f_{\psi_0}$ on $\mathcal D_{\mathrm{seed}}$ before any round-1 context is collected.
 \State Tune selector coefficients $(\lambda_V,\lambda_U,\lambda_D,\lambda_N,T,\epsilon,\kappa,\tau)$ on Stage 0 only and freeze them.
-\State Initialize cumulative buffers $\mathcal M^{+}_{\le 0}=\mathcal M^{-}_{\le 0}=\mathcal M^{0}_{\le 0}=\varnothing$.
+\State Initialize full-trajectory buffers $\mathcal M^{+}_{\le 0}=\mathcal M^{-}_{\le 0}=\mathcal M^{0}_{\le 0}=\varnothing$ and repair buffer $\mathcal M^{\mathrm{rep}}_{\le 0}=\varnothing$.
 \For{round $r=1,2,\dots,R$}
     \For{each decision context $c$ collected in round $r$}
         \State Sample $K$ raw candidate chunks from the current round-$r$ backbone $\pi_{\theta_r}$.
@@ -611,14 +744,27 @@ If $|\mathcal M_{\le r}^{+}|<8$, the code performs \emph{no} backbone update aft
             \State \textbf{continue}
         \EndIf
         \State Sample one candidate $A_{r,c}\sim \nu_r(\cdot\mid c)$ on the safe subset and log all propensities $p_{r,c,1:K}$.
-        \State Execute $a_{r,c,A_{r,c}}$ on the robot, continue the episode with $\pi_{\theta_r}$, and log $Y_{r,c}=M_{\mathrm{task}}(\text{executed episode trace})$.
+        \State Execute $a_{r,c,A_{r,c}}$ in the trusted environment, continue the episode with $\pi_{\theta_r}$, and log the trace, outcome $Y_{r,c}=M_{\mathrm{task}}(\text{trace})$, and progress values $q_f(t)$ when available.
         \State Append executed base feature $b_{r,c,A_{r,c}}$ to $\mathcal B_{\mathrm{hist}}$.
     \EndFor
     \State Form lagged DR pseudo-outcomes $\tilde y^{\mathrm{DR}}_{r,c,k}$ for the newly collected non-aborted contexts.
     \State Refit calibrator $(\mu_r,\sigma_r)=f_{\psi_r}(z)$ on all accumulated candidate tuples $\mathcal D^{\mathrm{tuple}}_{\le r}$.
-    \State Add each executed trajectory to exactly one of $\mathcal M_{\le r}^{+},\mathcal M_{\le r}^{-},\mathcal M_{\le r}^{0}$ using the LCB rules.
-    \If{$|\mathcal M_{\le r}^{+}|\ge 8$}
-        \State Build cumulative positive--negative pairs $\mathcal P_{\le r}$ and update only action-head LoRA parameters with $L_{\mathrm{PT}}$.
+    \For{each executed non-aborted context $(r,c)$}
+        \State Compute $\LCB_r(z_{r,c,A_{r,c}})=\mu_r(z_{r,c,A_{r,c}})-\kappa\sigma_r(z_{r,c,A_{r,c}})$.
+        \If{$Y_{r,c}=1$ and $\LCB_r(z_{r,c,A_{r,c}})>\tau$}
+            \State Add the full executed trajectory $\tau_{r,c}$ to $\mathcal M^{+}_{\le r}$.
+        \ElsIf{$Y_{r,c}=1$ and $0<\LCB_r(z_{r,c,A_{r,c}})\le\tau$}
+            \State Add $\tau_{r,c}$ to abstain buffer $\mathcal M^{0}_{\le r}$ for calibration only.
+        \Else
+            \State Add $\tau_{r,c}$ to negative buffer $\mathcal M^{-}_{\le r}$.
+            \If{FASR is enabled and $\tau_{r,c}$ satisfies the verified-progress eligibility rule}
+                \State Add only the capped prefix segment $\tau_{r,c}[0:t^*]$ to $\mathcal M^{\mathrm{rep}}_{\le r}$.
+            \EndIf
+        \EndIf
+    \EndFor
+    \State Let $\mathcal M^{\mathrm{adm}}_{\le r}=\mathcal M^{+}_{\le r}\cup\mathcal M^{\mathrm{rep}}_{\le r}$ be the admitted positive-update buffer.
+    \If{$|\mathcal M^{\mathrm{adm}}_{\le r}|\ge 8$}
+        \State Build cumulative positive--negative pairs $\mathcal P_{\le r}$ from $\mathcal M^{\mathrm{adm}}_{\le r}$ and $\mathcal M^{-}_{\le r}$; update only action-head LoRA parameters with $L_{\mathrm{PT}}$.
         \State Set $\pi_{\theta_{r+1}}$ to the updated backbone.
     \Else
         \State Skip the backbone update and keep $\pi_{\theta_{r+1}}=\pi_{\theta_r}$.
@@ -626,6 +772,7 @@ If $|\mathcal M_{\le r}^{+}|<8$, the code performs \emph{no} backbone update aft
 \EndFor
 \end{algorithmic}
 \end{algorithm}
+Strict CAVER is the special case of Algorithm~\thealgorithm{} with the FASR repair path disabled, so $\mathcal M^{\mathrm{rep}}_{\le r}=\varnothing$ for every round. The matched uniform $K=4$ baseline keeps the same candidate wrapper but replaces the selector with a uniform distribution and admits every executed trajectory to the same backend. The vanilla $K=1$ baseline removes the candidate menu entirely.
 
 \section{Theory: why the selective-verification layer is sensible}
 
@@ -701,14 +848,14 @@ This theory is a \emph{conditional context-level} statement. It does \emph{not} 
 
 \section{Stage-0 results and Stage-1 plan}
 \subsection{Research questions}
-\textbf{RQ1.} Can a small number of verified real executions correct a much larger cheap pool of provider-based signals?
+\textbf{RQ1.} Can a small number of trusted executions correct a much larger cheap pool of provider-based signals?
 
-\textbf{RQ2.} Under the same verified real budget, does CAVER outperform real-only $\pi$-StepNFT on the same $\pi_{0.5}$ backbone?
+\textbf{RQ2.} Under the same trusted-execution budget, can CAVER+FASR match or improve a trusted-execution-only $\pi$-StepNFT baseline while sending substantially less executed data into the same $\pi_{0.5}$ backend?
 
-\textbf{RQ3.} Under the same verified real budget, does CAVER transfer better to the real robot than world-model-heavy post-training that trusts imagined rollouts more directly?
+\textbf{RQ3.} In Stage 1, under the same real robot budget, does CAVER transfer better to PiPER than world-model-heavy post-training that trusts imagined rollouts more directly?
 
-\subsection{Stage 0: five-task LIBERO stage}
-Stage 0 is the full debugging and hyperparameter-tuning stage. It uses five LIBERO tasks:
+\subsection{Stage 0: five-family LIBERO proxy stage}
+Stage 0 is the full debugging and hyperparameter-tuning stage. It uses five semantic LIBERO proxy families:
 \begin{itemize}
     \item pick block to tray,
     \item place can into bowl,
@@ -716,7 +863,7 @@ Stage 0 is the full debugging and hyperparameter-tuning stage. It uses five LIBE
     \item relocate object to a marked goal region,
     \item open a simple drawer or cabinet handle.
 \end{itemize}
-All methods use the same decision protocol: $K=4$ candidates, $H=4$ executed commands per chunk, and verified budgets $N\in\{25,50,100,200\}$ contexts per task. Every Stage-0 experiment uses three random seeds.
+The main CAVER and matched uniform methods use $K=4$ candidates, $H=4$ executed commands per chunk, and trusted-execution budgets $N\in\{25,50,100\}$ counted contexts in the completed strict-CAVER Stage-0 runs. Stage 1 plans to extend the curve to $N=200$. The vanilla $K=1$ baseline intentionally removes the $K=4$ wrapper. The current CAVER+FASR main variant has been run at $N=25/50$ plus a diagnostic $N=10$ point. The completed Stage-0 runs use balanced multi-family manifests so each budget covers all five proxy families except the diagnostic $N=10$ FASR point, which covers only the earliest ordered manifest contexts. Every Stage-0 experiment uses three random seeds.
 
 \paragraph{Exact selector-tuning rule.}
 Hyperparameters $(\lambda_V,\lambda_U,\lambda_D,\lambda_N,T,\epsilon,\kappa,\tau)$ are tuned \emph{once} on Stage-0 validation by the scalar model-selection score
@@ -727,10 +874,10 @@ J_{\mathrm{S0}}
 -0.25\,\overline{\mathrm{ECE}}_{\mathrm{val}}
 -0.10\,\overline{\mathrm{Brier}}_{\mathrm{val}},
 \]
-where the overline denotes the average across the five Stage-0 tasks and three random seeds. $J_{\mathrm{S0}}$ is \emph{not} a training loss; it is only the rule used to freeze one selector setting for the rest of the study. If multiple settings are within one bootstrap standard error of the best $J_{\mathrm{S0}}$, choose the rightmost tie-break default from Table~\ref{tab:hparams}.
+where the overline denotes the average across the five Stage-0 proxy families and three random seeds. $J_{\mathrm{S0}}$ is \emph{not} a training loss; it is only the rule used to freeze one selector setting for the rest of the study. If multiple settings are within one bootstrap standard error of the best $J_{\mathrm{S0}}$, choose the rightmost tie-break default from Table~\ref{tab:hparams}.
 
 \paragraph{Stage-0 simulated warm-start set.}
-Every Stage-0 run begins with one fixed simulated seed set of 120 fully verified contexts, balanced as 24 contexts per Stage-0 task. This set is used in exactly the same way that the real seed set will later be used in Stage 1: first produce a common seed-warmed backbone checkpoint by one uniform-selector StepNFT warm-start pass of exactly 500 gradient steps, then fit the initial calibrator $f_{\psi_0}$ on the same fully verified tuples, and only then start counting the Stage-0 training budget $N$.
+Every Stage-0 run begins with one fixed simulated seed set of 120 fully verified contexts, balanced as 24 contexts per Stage-0 proxy family. This set mirrors the role of the real seed set planned for Stage 1: first produce a common seed-warmed backbone checkpoint by one uniform-selector warm-start pass of exactly 500 gradient steps, then fit the initial calibrator $f_{\psi_0}$ on the same fully verified tuples, and only then start counting the Stage-0 training budget $N$.
 
 \paragraph{Strict Stage-0 no-leakage policy.}
 Before any Stage-0 sweep begins, fix four \emph{disjoint} template lists for each LIBERO task:
@@ -740,31 +887,103 @@ Before any Stage-0 sweep begins, fix four \emph{disjoint} template lists for eac
 \mathcal T^{\mathrm{val}}_{\mathrm{S0}},\qquad
 \mathcal T^{\mathrm{test}}_{\mathrm{S0}}.
 \]
-The simulated seed list $\mathcal T^{\mathrm{seed}}_{\mathrm{S0}}$ contains the 24 warm-start contexts per task mentioned above. The validation list $\mathcal T^{\mathrm{val}}_{\mathrm{S0}}$ contains 20 held-out episodes per task and is used \emph{only} for the selector-selection score $J_{\mathrm{S0}}$ and checkpoint selection in Stage 0. The audit list $\mathcal T^{\mathrm{test}}_{\mathrm{S0}}$ contains 20 disjoint held-out episodes per task and is opened once only for final Stage-0 sanity plots. All budgeted Stage-0 online training contexts counted in $N$ are collected exclusively from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$. The proxy head $V_{\omega}$ may be fit only on executed tuples from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$ together with the shared Stage-1 real seed tuples; it may never use $\mathcal T^{\mathrm{val}}_{\mathrm{S0}}$ or $\mathcal T^{\mathrm{test}}_{\mathrm{S0}}$. The calibrator in Stage-0 dry runs may use only the simulated seed tuples plus accumulated training tuples from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$. Because GE-Sim is frozen in the mainline method, there is no Stage-0 provider-training split. The membership of every template ID in these four partitions is written to \texttt{manifest.lock} before the first Stage-0 sweep and is never changed mid-study.
+The simulated seed list $\mathcal T^{\mathrm{seed}}_{\mathrm{S0}}$ contains the 24 warm-start contexts per proxy family mentioned above. The validation list $\mathcal T^{\mathrm{val}}_{\mathrm{S0}}$ contains 20 held-out episodes per proxy family and is used \emph{only} for the selector-selection score $J_{\mathrm{S0}}$ and checkpoint selection in Stage 0. The audit list $\mathcal T^{\mathrm{test}}_{\mathrm{S0}}$ contains 20 disjoint held-out episodes per proxy family and is opened once only for final Stage-0 sanity plots. All budgeted Stage-0 online training contexts counted in $N$ are collected exclusively from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$. The proxy head $V_{\omega}$ may be fit only on executed tuples from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$ together with the shared Stage-1 real seed tuples; it may never use $\mathcal T^{\mathrm{val}}_{\mathrm{S0}}$ or $\mathcal T^{\mathrm{test}}_{\mathrm{S0}}$. The calibrator in Stage-0 dry runs may use only the simulated seed tuples plus accumulated training tuples from $\mathcal T^{\mathrm{train}}_{\mathrm{S0}}$. Because GE-Sim is frozen in the mainline method, there is no Stage-0 provider-training split. The membership of every template ID in these four partitions is written to \texttt{manifest.lock} before the first Stage-0 sweep and is never changed mid-study.
 
-\subsection{Current Stage-0 mainline result}
-We now have one completed strict proposal-mainline comparison on the five Stage-0 LIBERO proxy families. The executed path uses the lagged selector, the seeded three-head MLP value proxy, the seeded DR calibrator MLP, GE-Sim provider summaries, exact offline rollout-batch export, and the unchanged executed-sample backend. The matched real-only baseline uses the same candidate protocol and the same backend, but with a uniform selector and without selective admission.
+\subsection{Current Stage-0 results}
+We now have a completed Stage-0 simulation study on the five LIBERO proxy families, evaluated over seeds $\{7,13,29\}$. The executed path uses the previous-round selector, the seeded three-head MLP value proxy, the seeded DR calibrator MLP, GE-Sim provider summaries, exact offline rollout-batch export, and the fixed executed-sample backend used for the Stage-0 comparison. The current Stage-0 backend export consumes admitted rollout batches; negative and abstain executions are still logged for calibrator fitting and diagnostics. The full mirrored-pair StepNFT backend in Step~7 remains the pinned Stage-1 target and should not be confused with this completed Stage-0 rollout-batch implementation.
 
-Table~\ref{tab:stage0_mainline_results} and Figure~\ref{fig:stage0_mainline_results} summarize the completed budget-$50$ comparison over seeds $\{7,13,29\}$. The result does \emph{not} support a dominant raw-success claim: online success is slightly lower for CAVER ($0.387$ versus $0.400$), and held-out validation success is essentially tied ($0.200$ versus $0.203$). What it does support is the sample-efficiency claim that motivated CAVER in the first place. Held-out test success is slightly higher for CAVER ($0.223$ versus $0.213$) while the backend sees roughly $11.3\times$ fewer admitted demo items and $11.4\times$ fewer primitive steps.
+The primary matched trusted-execution-only baseline uses the same $K=4,H=4$ candidate protocol and the same backend, but with a uniform selector and without selective admission. We also include a stricter vanilla $K=1$ baseline because the $K=4$ candidate wrapper is itself a nontrivial intervention. This distinction matters: strict CAVER alone does \emph{not} support a dominant raw-success claim. Instead, Table~\ref{tab:stage0_budget_curve_results} and Figure~\ref{fig:stage0_budget_curve_results} show that strict CAVER preserves comparable held-out success while sending far fewer admitted examples into the backend. At $N=50$, strict CAVER reaches held-out test success $0.223$ versus $0.213$ for matched uniform $K=4$ and $0.227$ for vanilla $K=1$, while admitting $338$ demo items instead of about $3800$.
+
+The main empirical result is CAVER+FASR in Figure~\ref{fig:stage0_fasr_budget_curve}: it modestly improves mean held-out test success over vanilla $K=1$ at $N=25$ and $N=50$ while still using far less backend update data. This is the paper's current best answer to the ``why not just use $K=1$?'' pressure point.
+
+Here, held-out validation/test success means success on disjoint LIBERO episodes not used for training. Demo items and primitive steps measure how much data reached the backend, not how many contexts were executed. This distinction is important because CAVER can execute the same number of trusted contexts as a baseline while admitting far fewer records into the backend update.
+
+\begin{center}
+\fbox{\begin{minipage}{0.94\linewidth}
+\textbf{Stage-0 backend boundary.} The numbers below evaluate CAVER's selection/admission layer with the implemented Stage-0 exact offline rollout-batch backend. They do not yet validate the full mirrored-pair StepNFT backend on PiPER. That backend is pinned for Stage 1 and remains part of the hardware-readiness gate.
+\end{minipage}}
+\end{center}
 
 \begin{table}[H]
 \centering
 \small
-\caption{Strict Stage-0 proposal-mainline comparison at budget $N=50$ on the five LIBERO proxy families. Values are mean $\pm$ population standard deviation over seeds $\{7,13,29\}$. \label{tab:stage0_mainline_results}}
-\begin{tabular}{@{}lcccccc@{}}
+\caption{Current Stage-0 held-out budget curve on the five LIBERO proxy families. Values are mean $\pm$ standard error over seeds $\{7,13,29\}$. The $K=4$ trusted-execution-only baseline matches CAVER's candidate wrapper but samples uniformly and admits every executed trajectory; $K=1$ is the vanilla single-candidate baseline. \label{tab:stage0_budget_curve_results}}
+\begin{tabular}{@{}llccccc@{}}
 \toprule
-Method & Online & Held-out val & Held-out test & Admitted ctx & Demo items & Primitive steps \\
+Method & $N$ & Held-out val & Held-out test & Admitted ctx & Demo items & Primitive steps \\
 \midrule
-CAVER & $0.387 \pm 0.009$ & $0.200 \pm 0.008$ & $\mathbf{0.223 \pm 0.005}$ & $10.0 \pm 0.0$ & $338 \pm 6$ & $1338 \pm 18$ \\
-Real-only & $\mathbf{0.400 \pm 0.000}$ & $\mathbf{0.203 \pm 0.012}$ & $0.213 \pm 0.005$ & $50.0 \pm 0.0$ & $3807 \pm 43$ & $15194 \pm 173$ \\
+Strict CAVER & 25 & $0.217 \pm 0.007$ & $0.220 \pm 0.010$ & $5.0 \pm 0.0$ & $167 \pm 2$ & $660 \pm 10$ \\
+Strict CAVER & 50 & $0.200 \pm 0.006$ & $0.223 \pm 0.003$ & $10.0 \pm 0.0$ & $338 \pm 4$ & $1338 \pm 13$ \\
+Strict CAVER & 100 & $0.190 \pm 0.000$ & $0.227 \pm 0.007$ & $24.3 \pm 4.3$ & $849 \pm 172$ & $3353 \pm 682$ \\
+\midrule
+Uniform $K=4$ & 25 & $0.213 \pm 0.007$ & $0.230 \pm 0.015$ & $25.0 \pm 0.0$ & $1895 \pm 17$ & $7563 \pm 65$ \\
+Uniform $K=4$ & 50 & $0.203 \pm 0.009$ & $0.213 \pm 0.003$ & $50.0 \pm 0.0$ & $3807 \pm 30$ & $15194 \pm 122$ \\
+Uniform $K=4$ & 100 & $0.217 \pm 0.015$ & $0.233 \pm 0.003$ & $100.0 \pm 0.0$ & $7659 \pm 21$ & $30574 \pm 84$ \\
+\midrule
+Vanilla $K=1$ & 25 & $0.213 \pm 0.009$ & $0.227 \pm 0.003$ & $25.0 \pm 0.0$ & $1885 \pm 12$ & $7521 \pm 48$ \\
+Vanilla $K=1$ & 50 & $0.220 \pm 0.010$ & $0.227 \pm 0.007$ & $50.0 \pm 0.0$ & $3816 \pm 27$ & $15238 \pm 107$ \\
+Vanilla $K=1$ & 100 & $0.203 \pm 0.009$ & $0.227 \pm 0.003$ & $100.0 \pm 0.0$ & $7629 \pm 24$ & $30445 \pm 99$ \\
+\midrule
+Vanilla $K=1$+FASR & 25 & $0.203 \pm 0.005$ & $0.223 \pm 0.003$ & $10.0 \pm 0.6$ & $400 \pm 9$ & $1586 \pm 35$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.98\linewidth]{figures/stagee_mainline_budget50_summary.pdf}
-\caption{Current Stage-E mainline result. Left: held-out test success versus admitted demo items, with one point per seed and a star for the mean. Right: mean online, held-out validation, and held-out test success. The Stage-0 result is best read as a sample-efficiency result rather than a dominant online-success result. \label{fig:stage0_mainline_results}}
+\includegraphics[width=0.92\linewidth]{figures/stagee_heldout_budget_curve_with_k1.pdf}
+\caption{Strict Stage-0 held-out checkpoint curve for $N\in\{25,50,100\}$. Strict CAVER mainly supports backend-data efficiency, while vanilla $K=1$ remains a strong raw-success baseline. \label{fig:stage0_budget_curve_results}}
+\end{figure}
+
+Three caveats are intentionally left visible. First, the strict CAVER curve supports an admitted-update-data efficiency claim, not a stronger claim that CAVER needs fewer trusted executions to reach a higher success rate. Second, vanilla $K=1$ is a strong baseline in this simulation setting and must remain in the main comparison. Third, strict CAVER's conservative gate admits a small subset of successful executions, and the admitted updates are not uniformly distributed across all five proxy families. That concentration motivates CAVER+FASR rather than being hidden.
+
+The completed $N=50$ attribution ablations clarify why the main empirical variant moved from strict CAVER to CAVER+FASR. Table~\ref{tab:stage0_attribution_results} shows that selection-only matches strict CAVER on held-out test but uses trusted-execution-only-scale backend data; admission-only matches the uniform selector baseline but its admitted-data accounting was not retained in the current summary; no-provider remains close to strict CAVER; and no-DR is hard to interpret because two seeds admit no data and therefore skip the backend update. Success-only admission improves raw held-out test by admitting every executed success instead of applying the full LCB gate. A capped hard-family rescue variant keeps the guarded selector, writes full traces for all executed contexts, and admits a small number of hard-family near-miss failures when a family has too few successes. That variant improves $N=50$ held-out test to $0.237\pm0.007$, but increasing the rescue quota to three near misses per hard family drops held-out test to $0.223\pm0.007$ and increases backend data.
+
+CAVER+FASR changes the rescue rule from ``admit full failed traces from hard families'' to ``preserve executed successes and add only short verified-progress repair segments.'' The resulting budget points are:
+\[
+\begin{array}{c|ccc}
+N & 10 & 25 & 50\\
+\hline
+\text{held-out validation} & 0.207\pm0.003 & 0.220\pm0.008 & 0.220\pm0.005\\
+\text{held-out test} & 0.233\pm0.005 & 0.237\pm0.007 & 0.240\pm0.005\\
+\text{demo items} & 399 & 796 & 785\\
+\text{primitive steps} & 1584 & 3149 & 3110
+\end{array}
+\]
+These are means with standard errors over seeds $\{7,13,29\}$. The $N=25$ point is important because it directly addresses the vanilla $K=1$ pressure point: CAVER+FASR reaches held-out test $0.237$ versus $0.227$ for vanilla $K=1$, while admitting $796$ rather than $1885$ demo items. The $N=25$ and $N=50$ FASR points are independent sweeps, not one cumulative run extended from 25 to 50 contexts; this is why the mean admitted demo count can be slightly lower at $N=50$ after repair capping and seed variation. This is cleaner than full-trace hard-family rescue because it does not relabel whole failed episodes as positive imitation targets. The caveats are that the raw-success margin is modest and the $N=10$ point is a very-low-budget diagnostic rather than a complete five-family budget point.
+
+Two fairness controls are especially important for interpreting FASR. The completed vanilla $K=1$+FASR control at $N=25$ reaches held-out test $0.223\pm0.003$, below both vanilla $K=1$ ($0.227\pm0.003$) and CAVER+FASR ($0.237\pm0.007$). Thus the current CAVER+FASR improvement is not explained by simply adding progress-label repair to a single sampled chunk. The remaining direct control is uniform $K=4$+FASR: it uses the same four-candidate wrapper and the same FASR admission/repair rule, but removes provider-aware CAVER selection. The first uniform $K=4$+FASR jobs reached held-out evaluation but failed during final RDSS compact-artifact copy-back, so their parsed log numbers are treated only as triage. Clean recovery jobs are running under the metadata-free copy-back path, and final tables should be refreshed after their \texttt{posttrain\_holdout\_summary.json} files are available.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Stage-0 $N=50$ attribution ablations on the five LIBERO proxy families. Values are mean $\pm$ standard error over seeds $\{7,13,29\}$ unless otherwise noted. Demo items and primitive steps are the mean admitted backend data retained in the current summaries. \label{tab:stage0_attribution_results}}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Method & Held-out val & Held-out test & Demo items & Primitive steps \\
+\midrule
+Strict CAVER & $0.200 \pm 0.005$ & $0.223 \pm 0.003$ & $338$ & $1338$ \\
+Uniform $K=4$ & $0.203 \pm 0.007$ & $0.213 \pm 0.003$ & $3807$ & $15194$ \\
+Vanilla $K=1$ & $0.220 \pm 0.008$ & $0.227 \pm 0.005$ & $3816$ & $15238$ \\
+Selection-only & $0.230 \pm 0.008$ & $0.223 \pm 0.003$ & $3793$ & $15139$ \\
+Admission-only & $0.207 \pm 0.007$ & $0.213 \pm 0.005$ & -- & -- \\
+Success-only admission & $0.213 \pm 0.003$ & $0.233 \pm 0.003$ & $769$ & $3049$ \\
+Hard-family rescue & $0.220 \pm 0.005$ & $0.237 \pm 0.007$ & $1414$ & $5631$ \\
+Hard-family rescue quota-3 & $0.203 \pm 0.009$ & $0.223 \pm 0.007$ & $1714$ & $6831$ \\
+Failure-diagnostic success & $0.203 \pm 0.003$ & $0.230 \pm 0.000$ & $814$ & $3231$ \\
+CAVER+FASR & $0.220 \pm 0.005$ & $0.240 \pm 0.005$ & $785$ & $3110$ \\
+No-DR & $0.217 \pm 0.005$ & $0.227 \pm 0.003$ & $29^\dagger$ & $114^\dagger$ \\
+No-provider & $0.210 \pm 0.005$ & $0.220 \pm 0.005$ & $662$ & $2614$ \\
+\bottomrule
+\end{tabular}
+\vspace{0.4em}
+\caption*{\footnotesize $^\dagger$No-DR admitted data for only one seed; the other two seeds skipped backend update because no trajectories were admitted. The quota-3 rescue row is a negative sweep. The CAVER+FASR row preserves successes and admits only short verified-progress repair segments, not whole failed traces.}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/stagee_fasr_verified_progress_budget_curve_with_k1.pdf}
+\caption{Stage-0 held-out checkpoint curves including CAVER+FASR. CAVER+FASR modestly improves mean held-out test success over vanilla $K=1$ at $N=25$ and $N=50$ while admitting fewer backend records. Missing cells reflect the different completed budget grids. \label{fig:stage0_fasr_budget_curve}}
 \end{figure}
 
 \paragraph{Shared seed real set.}
@@ -775,6 +994,13 @@ Before the matched-budget Stage-1 study, collect one common warm-start dataset o
     \item \textbf{WoVR only:} the same seed tuples may also initialize any observation normalizers or reward-scale statistics required by the public RLinf implementation, but may not be supplemented by extra real data.
 \end{itemize}
 No method may collect extra real interactions before the matched-budget curve starts. The shared seed set is therefore a \emph{common warm-start cost}, reported separately from the matched-budget training curves rather than silently folded into them.
+
+\subsection{Stage-F readiness gate before the full PiPER study}
+The PiPER path is treated as a gated transfer, not as completed evidence. Stage F means the hardware-readiness gate before budgeted PiPER learning. Before any budgeted hardware learning run, Stage F must pass: (i) shadow-mode execution in which the robot-control machine captures observations, forms candidates, computes safety masks and propensities, and logs the chosen action without executing learned motion; (ii) local safety-shield validation on scripted safe chunks and deliberately invalid chunks; (iii) marker/geometric end-state labeler validation against manual inspection; (iv) progress-label validation for every task on which CAVER+FASR would be used; and (v) latency logging for policy sampling, GE-Sim/provider inference, selector/calibrator scoring, and robot idle time. If the progress labels fail validation, the PiPER pilot uses strict CAVER as the fallback primary variant.
+
+The progress-label gate is deliberately numeric. Before FASR is enabled on a PiPER task, collect at least 10 scripted or teleoperated calibration traces for that task with object-marker poses, automatic progress scores, final success labels, and manual prefix audits. The task passes only if the automatic final success label agrees with manual inspection on at least 90\% of traces, the automatic FASR prefix-eligibility decision agrees with manual inspection on at least 90\% of audited traces, and the false-eligible repair rate is at most 5\%. If marker confidence falls below 0.90 in more than 3 of the final 10 frames or the prefix audit is ambiguous, that trace is marked audit-required and cannot be used to enable FASR.
+
+The first hardware pilot is one task and one seed only, with $N=25$, and is used to validate the loop rather than to claim significance. The full three-task study below begins only after this readiness gate passes.
 
 \subsection{Stage 1: planned three-task PiPER study}
 The real study uses exactly three tasks: block-to-tray, can-to-bowl, and two-block stack. Each Stage-1 training run is task-specific, each episode permits at most four decision contexts, and each round contains exactly $B_{\mathrm{round}}=25$ counted training contexts. Therefore the main \emph{training} budget curve $N\in\{25,50,100,200\}$ corresponds to exactly $R=N/25\in\{1,2,4,8\}$ rounds per task and per method, together with one mandatory $N=0$ seed-only anchor point that corresponds to the common seed-warmed checkpoint $\pi_{\theta_1}$ before any Stage-1 training. For the three main trainable methods (CAVER, real-only $\pi$-StepNFT, and WoVR), the study records two independent full training runs at every budget and a third independent run at $N=100$ as the primary stability point.
@@ -801,11 +1027,13 @@ The WoVR/RLinf baseline receives the same common seed-warmed starting checkpoint
 \begin{itemize}
     \item \textbf{Seed-only anchor:} the common seed-warmed checkpoint $\pi_{\theta_1}$ with no Stage-1 training. This baseline isolates the contribution of the shared 120-context warm-start.
     \item \textbf{Real-only baseline:} $\pi$-StepNFT on $\pi_{0.5}$ using the same candidate-generation wrapper but a uniform selector over the $K$ candidates, with every executed trajectory admitted to training and no selective-verification correction.
+    \item \textbf{Vanilla real-only $K=1$:} the stricter single-candidate real-only baseline for Stage 1. This baseline removes the shared $K=4$ candidate wrapper and tests whether CAVER improves over ordinary executed-trajectory fine-tuning rather than only over a matched uniform-candidate wrapper.
     \item \textbf{World-model-heavy baseline:} WoVR through RLinf, using imagined rollouts as the primary update signal \citep{jiang2026wovr,rlinfrepo2026}.
 \end{itemize}
 
 \paragraph{Mandatory attribution ablations.}
 \begin{itemize}
+    \item \textbf{Strict CAVER:} keep CAVER's selector, exact-propensity logging, DR calibrator, and LCB admission rule, but remove FASR repair segments. This is the conservative base rule.
     \item \textbf{Selection-only:} keep CAVER's selector and exact-propensity logging, but admit every executed trajectory to StepNFT with no conservative admit/abstain gate.
     \item \textbf{Admission-only:} use the same uniform safe-set selector as the real-only baseline, but apply CAVER's DR calibrator and conservative admit/abstain rule before StepNFT.
     \item \textbf{Random verification:} keep the same conservative gate as full CAVER, but choose the executed safe candidate uniformly at random.
@@ -823,10 +1051,10 @@ The WoVR/RLinf baseline receives the same common seed-warmed starting checkpoint
 \end{itemize}
 
 \paragraph{Fairness rule.}
-All methods share the same public base weights \texttt{gs://openpi-assets/checkpoints/pi05\_base/params}, the same local \texttt{pi05\_piper\_h4} policy interface, the same seed real dataset, the same common seed-warm-start checkpoint $\pi_{\theta_1}$, the same deterministic safety shield, the same Stage-0 tasks, the same Stage-1 tasks, the same real-rollout budget, and the same final evaluation protocol. CAVER and the real-only baseline also share the same candidate-generation wrapper and the same executed-update backend: the same $K=4$ candidate draws per decision context, the same chunk horizon $H=4$, the same LoRA target modules, the same optimizer, the same learning-rate schedule, the same batch size, the same positive--negative pair construction, the same gradient clip, and the same number of update steps. The real-only baseline uses a uniform selector and admits every executed trajectory to the StepNFT trainer; CAVER differs only by using provider-based scoring, exact-propensity logging, doubly robust calibration, and a conservative admit-or-skip rule before examples enter that same trainer. The mandatory selection-only and admission-only ablations are included precisely so that any observed gain can be attributed more cleanly to verification allocation, conservative admission, or their combination rather than to the unchanged StepNFT backend itself.
+All methods share the same public $\pi_{0.5}$ base checkpoint, the same local \texttt{pi05\_piper\_h4} policy interface, the same seed real dataset, the same common seed-warm-start checkpoint $\pi_{\theta_1}$, the same deterministic safety shield, the same Stage-0 proxy families, the same Stage-1 tasks, the same Stage-1 real-rollout budget, and the same final evaluation protocol. CAVER+FASR and the real-only baseline also share the same candidate-generation wrapper and the same executed-update backend: the same $K=4$ candidate draws per decision context, the same chunk horizon $H=4$, the same LoRA target modules, the same optimizer, the same learning-rate schedule, the same batch size, the same positive--negative pair construction, the same gradient clip, and the same number of update steps. The real-only baseline uses a uniform selector and admits every executed trajectory to the StepNFT trainer; CAVER+FASR differs by using provider-based scoring, exact-propensity logging, doubly robust calibration, conservative admission, and verified-progress repair segments before examples enter that same trainer. The mandatory strict-CAVER, selection-only, admission-only, and no-DR ablations are included precisely so that any observed gain can be attributed more cleanly to verification allocation, conservative admission, failure-aware repair, or their combination rather than to the unchanged StepNFT backend itself.
 
 \subsection{Metrics}
-The main metrics are:
+The current Stage-0 report and planned Stage-1 study use overlapping but not identical metrics. Stage 0 reports simulated held-out validation/test success, admitted backend data, and ablations. Stage 1 will add real-robot success, real interaction accounting, latency, and hardware safety diagnostics. The main metrics are:
 \begin{itemize}
     \item \textbf{Held-out real-robot success rate:} mean binary success over the 30 final test episodes per task.
     \item \textbf{Success gain per 100 verified contexts:}
@@ -858,9 +1086,11 @@ The main metrics are:
 The continuous progress score $\bar Y$ is reported only as a diagnostic.
 
 \subsection{What the current Stage-0 result supports}
-The current Stage-0 result is strong enough to close the simulation-first mainline bring-up and carry the method forward to PiPER, but it supports a narrower story than a dominant-success-rate narrative. The right framing is that CAVER preserves held-out performance while materially reducing the amount of trusted executed data consumed by the unchanged backend. That framing is directly aligned with the motivating regime of scarce trusted execution.
+The current Stage-0 result is strong enough to justify PiPER integration and a gated real-robot pilot, but it should still be read carefully. Strict CAVER supports a backend-data-efficiency story: it preserves comparable held-out performance while materially reducing the amount of trusted executed data consumed by the unchanged backend. CAVER+FASR is now the stronger Stage-0 empirical variant: it reaches held-out test $0.237$ at $N=25$ and $0.240$ at $N=50$, while using far less backend data than vanilla $K=1$. The completed vanilla $K=1$+FASR control at $N=25$ reaches only $0.223$, which is evidence that CAVER+FASR is not just FASR attached to the vanilla baseline. However, the raw-success margin is still modest, the $N=10$ point is diagnostic rather than full-family, the uniform $K=4$+FASR control is still awaiting clean recovery summaries, and none of the Stage-0 results prove completed real-robot sample efficiency.
 
-This matters for how the next stage should be judged. Stage 1 should test whether the same sample-efficiency pattern survives transfer to PiPER under the same candidate protocol, safety rules, and backend. If Stage 1 reproduces that pattern, the combined paper becomes stronger. If it does not, the Stage-0 result still stands as a concrete simulation-first selective-verification result and should not be rewritten into a false claim of raw success-rate dominance.
+This matters for how the next stage should be judged. Stage 1 should test whether the same backend-data efficiency pattern survives transfer to PiPER and whether CAVER+FASR becomes real-interaction efficiency under hardware constraints. The necessary real-robot claim is stronger than the current Stage-0 claim: CAVER+FASR should either outperform real-only at a matched $N$, reach comparable success at a smaller $N$, or provide a clear systems benefit by matching success with substantially less admitted update data. If Stage 1 reproduces only the third pattern, the combined paper should remain a selective-admission/data-efficiency paper rather than a raw-success paper.
+
+The Stage-0 ablations also motivate a conservative implementation decision before the full hardware study. We should not delay PiPER readiness work for another broad redesign, because camera calibration, safety filtering, labeler validation, latency measurement, and shadow-mode logging do not spend matched training budget and are needed regardless of the final admission rule. However, the simulation section should be refreshed once uniform $K=4$+FASR finishes, because that control is the cleanest way to separate provider-aware selection from progress-label repair. We should also \emph{not} launch the full three-task PiPER study before the progress-label assumption behind FASR is validated on hardware. The first hardware pilot should include (i) CAVER+FASR as the primary candidate, (ii) strict CAVER as the fallback/base rule, and (iii) the real-only $K=4$ and vanilla $K=1$ baselines as feasible. Shadow-mode logs should specifically inspect $\mu$, $\sigma$, LCB, admitted-positive rate, hard-family coverage, skipped-update frequency, verified-progress repair counts, progress-label agreement, and provider latency. If progress labels are unreliable, fall back to strict CAVER or a threshold-relaxed admission rule for the full Stage-1 curve.
 
 \section{Concrete implementation plan: Stage-0 LIBERO and Stage-1 PiPER instantiations}
 This section pins two concrete instantiations of the abstract CAVER interfaces from the main method. Stage 0 is the simulation proxy study: LIBERO acts as the trusted execution environment, a LIBERO-specific execution adapter instantiates $\Gamma_{\mathrm{exec}}$, a LIBERO-to-GE-Sim bridge instantiates $\Phi_{\Omega}$, and the simulator task-success signal instantiates $M_{\mathrm{task}}$. Stage 1 is the real transfer study: the concrete execution adapter is denoted
@@ -873,10 +1103,28 @@ and maps raw $\pi_{0.5}$ chunks into PiPER joint/gripper execution commands. The
 \]
 and maps those execution commands into the public GE-Sim conditioning format. The concrete safety shield is the PiPER URDF-based hard filter described below, and the concrete verified labeler is the marker-based geometric checker used in the Stage-1 real study. Porting CAVER to another robot changes these implementation modules and the associated local configs, but it does \emph{not} change selector scoring, exact propensity logging, doubly robust correction, calibrator fitting, or the StepNFT-style executed-update backend.
 
-\subsection{Concrete Stage-0 LIBERO simulation instantiation}
-Stage 0 is not just a debugging convenience; it is the concrete simulation instantiation used to fit the proxy head, lock selector defaults, and validate the roundwise protocol before any PiPER run is attempted. Each Stage-0 run uses LIBERO as the trusted execution environment, keeps the same chunk horizon $H=4$, candidate count $K=4$, round size $B_{\mathrm{round}}=25$, and matched counted-context budgets used later, and compares CAVER directly against the real-only $\pi$-StepNFT path plus attribution ablations on five LIBERO task families.
+\begin{table}[H]
+\centering
+\small
+\caption{Boundary between completed Stage-0 evidence and planned Stage-1 hardware evidence.\label{tab:stage0_stage1_boundary}}
+\begin{tabularx}{\linewidth}{@{}p{3.2cm}XX@{}}
+\toprule
+Component & Completed Stage 0 & Planned Stage 1 \\
+\midrule
+Trusted execution environment & LIBERO simulation. & PiPER hardware. \\
+Execution adapter & LIBERO action adapter with finite, shape, and magnitude checks. & PiPER joint/gripper adapter with URDF and workspace checks. \\
+Provider adapter & LIBERO-to-GE-Sim compatibility bridge. & PiPER-to-GE-Sim compatibility bridge. \\
+Verified labeler & Simulator task-success signal plus progress diagnostics. & Marker-based geometric task labeler with audit triggers. \\
+Backend validated so far & Exact offline rollout-batch export for admitted successful records. & Full mirrored-pair StepNFT backend pinned in Step 7. \\
+Claim supported now & CAVER+FASR gives simulation selective-admission/sample-efficiency evidence; strict CAVER is the conservative base ablation. & Real-robot sample efficiency remains to be tested. \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
-The Stage-0 bridge preserves the method-level interfaces rather than introducing a separate algorithm. Raw $\pi_{0.5}$ chunks are converted into LIBERO simulator control commands through a deterministic execution adapter, the same chunks are mapped into GE-Sim-compatible provider arrays through a LIBERO-to-GE-Sim compatibility map, and the trusted label comes from the simulator's task-completion signal together with the fixed Stage-0 progress diagnostics. This makes the Stage-0 study a concrete provider-aware selective-verification experiment in its own right, not a placeholder for the PiPER section.
+\subsection{Concrete Stage-0 LIBERO simulation instantiation}
+Stage 0 is not just a debugging convenience; it is the concrete simulation instantiation used to fit the proxy head, lock selector defaults, and validate the roundwise protocol before any PiPER run is attempted. Each Stage-0 run uses LIBERO as the trusted execution environment, keeps the same chunk horizon $H=4$, candidate count $K=4$, round size $B_{\mathrm{round}}=25$, and matched counted-context budgets used later, and compares CAVER directly against the trusted-execution-only $\pi$-StepNFT path plus attribution ablations on five LIBERO proxy families.
+
+The Stage-0 bridge preserves the method-level interfaces rather than introducing a separate algorithm. Raw $\pi_{0.5}$ chunks are converted into LIBERO simulator control commands through a deterministic execution adapter, invalid candidate tensors are rejected by finite/shape/magnitude checks before selection, the same chunks are mapped into GE-Sim-compatible provider arrays through a LIBERO-to-GE-Sim compatibility map, and the trusted label comes from the simulator's task-completion signal together with the fixed Stage-0 progress diagnostics. This makes the Stage-0 study a concrete provider-aware selective-verification experiment in its own right, not a placeholder for the PiPER section.
 
 \subsection{Two-machine deployment}
 Use two machines throughout the project.
@@ -924,7 +1172,7 @@ cd openpi
 GIT_LFS_SKIP_SMUDGE=1 uv sync
 GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 \end{lstlisting}
-These commands follow the public openpi setup path \citep{openpi2026repo}. After installation, add the local config \texttt{pi05\_piper\_h4} by copying the public \texttt{pi05\_libero} config and changing only the action horizon to 4 and the output adapter to \texttt{PiperJointDeltaOutputs}; the weight loader remains \texttt{gs://openpi-assets/checkpoints/pi05\_base/params}.
+These commands follow the public openpi setup path \citep{openpi2026repo}. After installation, add the local config \texttt{pi05\_piper\_h4} by copying the public \texttt{pi05\_libero} config and changing only the action horizon to 4 and the output adapter to \texttt{PiperJointDeltaOutputs}; the weight loader remains the public \texttt{pi05\_base} checkpoint.
 
 \textbf{Frozen provider (Genie Envisioner / GE-Sim).}
 \begin{lstlisting}
@@ -983,7 +1231,7 @@ python benchmark_scripts/download_libero_datasets.py \
 This follows the public LIBERO repository and dataset instructions \citep{libero2023benchmark,liberorepo2026}.
 
 \textbf{Stage-0 simulation protocol.}
-The concrete Stage-0 study uses the LIBERO adapter above to run the same candidate/chunk protocol that will later be used on PiPER: sample $K=4$ chunks from $\pi_{0.5}$, score them with the frozen provider and the fixed proxy-plus-calibrator stack, execute at most one safety-approved chunk per counted context, log the exact propensity, and train the unchanged StepNFT-style backend only on admitted executed trajectories. All Stage-0 headline plots compare CAVER against the real-only baseline under matched counted-context budgets on the five LIBERO proxy task families before any Stage-1 transfer claim is made.
+The concrete Stage-0 study uses the LIBERO adapter above to run the same candidate/chunk protocol that will later be used on PiPER: sample $K=4$ chunks from $\pi_{0.5}$, score them with the frozen provider and the fixed proxy-plus-calibrator stack, execute at most one safety-approved chunk per counted context, log the exact propensity, and train the unchanged StepNFT-style backend only on admitted executed trajectories or verified-progress repair segments. Stage-0 headline plots compare CAVER+FASR against both the matched trusted-execution-only $K=4$ baseline and the stricter vanilla $K=1$ baseline under matched counted-context budgets on the five LIBERO proxy task families before any Stage-1 transfer claim is made. The completed strict-CAVER held-out $N\in\{25,50,100\}$ curve supports matched-budget admitted-update-data efficiency as the conservative base result. CAVER+FASR adds $N\in\{10,25,50\}$ evidence and shows a modest raw held-out-test improvement over vanilla $K=1$ at $N=25$ and $N=50$ with far less admitted backend data. It still does not prove the stronger real-robot claim that CAVER needs fewer trusted executions on hardware.
 
 \textbf{World-model-heavy baseline (WoVR through RLinf).}
 \begin{lstlisting}
@@ -1095,7 +1343,11 @@ Before the first real run, write one immutable \texttt{manifest.lock} file conta
 \subsection{Hard safety shield implementation}
 The safety shield in Step~4b is implemented on the robot-control machine and is shared unchanged by CAVER, the real-only baseline, the seed-data collection pass, and any WoVR real execution. The bridge evaluates every candidate chunk with the PiPER URDF, the calibrated table plane, and a padded collision model \emph{before} the selector is allowed to sample a real action. The exact rejection rules are the ones in Step~4b: joint bounds, velocity caps, acceleration caps, workspace-box limits, and padded self/table-collision checks. Runtime monitoring then re-checks the currently observed joint state at 20 Hz and triggers the same abort rules during execution. Every rejection or abort is logged with a categorical reason code from the fixed set
 \[
-\{\texttt{joint\_limit},\texttt{velocity},\texttt{acceleration},\texttt{workspace},\texttt{self\_collision},\texttt{table\_collision},\texttt{heartbeat},\texttt{tracking},\texttt{manual\_estop}\}.
+\begin{aligned}
+\{&\texttt{joint\_limit},\texttt{velocity},\texttt{acceleration},\texttt{workspace},\\
+  &\texttt{self\_collision},\texttt{table\_collision},\texttt{heartbeat},
+    \texttt{tracking},\texttt{manual\_estop}\}.
+\end{aligned}
 \]
 The final paper will report the frequency of each reason code per method and per task so that any success gain cannot hide an unsafe execution pattern.
 
@@ -1113,14 +1365,17 @@ The training/evaluation accounting is also fixed:
 \subsection{Contingency plan if GE-Sim integration fails early}
 The proposal should remain executable even if the primary provider is delayed. The contingency trigger is simple: if the team cannot produce stable short-horizon GE-Sim predictions on Stage-0 LIBERO trajectories by the end of week 4, freeze the current CAVER interface and temporarily substitute the lightweight local provider described in Appendix~\ref{app:contingency}. That contingency is \emph{not} the main claim and should be clearly labeled as such in the eventual paper.
 
-\section{Why the current paper claim is publishable}
-The current paper claim is publishable because it asks one narrow question, compares against strong matched baselines, and commits to a concrete implementation path. The paper should be framed as a selective-verification study for flow-based VLA post-training under strict matched real budgets, not as a fundamentally new RL algorithm.
+\section{Claim scope and evidence}
+The current paper claim is intentionally narrow: CAVER is a selective-verification layer for flow-based VLA post-training under strict matched trusted-execution budgets, not a fundamentally new RL algorithm. The completed Stage-0 evidence supports CAVER+FASR as the main simulation variant: it modestly improves held-out test success over vanilla $K=1$ at low budgets while using much less admitted backend data, and the completed $K=1$+FASR control does not explain that improvement. Strict CAVER remains important as the conservative base rule showing admitted-update-data efficiency without repair segments. The current evidence does not yet prove broad raw-success superiority or completed real-robot sample efficiency, and the uniform $K=4$+FASR fairness control remains an active recovery run rather than a finalized table entry.
+
+\paragraph{Limitations that remain after the current revision.}
+First, all completed evidence is LIBERO simulation evidence; PiPER hardware remains a planned Stage-F/Stage-1 path. Second, the raw held-out-success margin of CAVER+FASR over vanilla $K=1$ is modest, so the strongest current story is selective admission with much lower backend data rather than broad dominance. Third, FASR depends on reliable progress labels; if those labels are noisy on hardware, strict CAVER must be the fallback. Fourth, the $N=10$ CAVER+FASR point is diagnostic and does not cover a complete balanced five-family budget. Fifth, uniform $K=4$+FASR must be finalized before claiming that provider-aware selection, rather than the shared $K=4$ wrapper plus repair admission, is responsible for the remaining margin. Sixth, the theory justifies the context-level verification layer, not end-to-end monotonic policy improvement after LoRA updates.
 
 \textbf{Novelty relative to ALOE.} ALOE studies action-level off-policy evaluation from logged VLA behavior. CAVER differs by making the data-collection choice itself part of the method: it decides which cheap candidate to verify online, logs exact propensities, and then uses those verified outcomes to decide which executed trajectories deserve a policy update \citep{yang2026aloe}.
 
-\textbf{Novelty relative to WoVR and World-VLA-Loop.} WoVR and World-VLA-Loop ask how to use world models more aggressively as simulators or co-evolving partners for RL. CAVER instead treats the world model as a frozen, imperfect signal source and asks how much real verification is needed to make that signal safe enough to exploit \citep{jiang2026wovr,liu2026worldvlaloop}.
+\textbf{Novelty relative to WoVR and World-VLA-Loop.} WoVR and World-VLA-Loop ask how to use world models more aggressively as simulators or co-evolving partners for RL. CAVER instead treats the world model as a frozen, imperfect signal source and asks how much trusted verification is needed to make that signal safe enough to exploit \citep{jiang2026wovr,liu2026worldvlaloop}.
 
-\textbf{Novelty relative to real-only post-training.} Real-only $\pi$-StepNFT asks how to update a flow-based VLA from executed trajectories. CAVER asks a different question: given the same real budget and the same executed-update backend, can better selection and correction collect \emph{more informative} executed trajectories \citep{wang2026pistepnft}? The main experimental burden is therefore attribution, which is why the paper requires the selection-only, admission-only, seed-size, utility-refresh, and proxy-target ablations.
+\textbf{Novelty relative to trusted-execution-only post-training.} Direct $\pi$-StepNFT asks how to update a flow-based VLA from executed trajectories. CAVER asks a different question: given the same trusted-execution budget and the same executed-update backend, can better selection and correction collect \emph{more informative} executed trajectories \citep{wang2026pistepnft}? The main experimental burden is therefore attribution, which is why the paper requires the selection-only, admission-only, seed-size, utility-refresh, and proxy-target ablations.
 
 \textbf{Engineering realism.} The implementation uses public stacks that can actually be installed: openpi for $\pi_{0.5}$, GE-Sim for the frozen provider, LIBERO for the concrete Stage-0 simulation study, PiPER SDK/ROS for the concrete Stage-1 execution study, and RLinf for WoVR. The method is written with interface-general interfaces, but the present paper now pins both the simulation-first validation path and the later hardware transfer path so another lab can audit exactly what was run. The paper also avoids unsupported claims about full online policy-gradient RL on the flow head and instead frames itself as a carefully controlled budgeted post-training study.
 
@@ -1128,10 +1383,10 @@ The current paper claim is publishable because it asks one narrow question, comp
 \paragraph{Specific future extensions.} The most natural next steps are deliberately separated from the present claim. First, replace the executed-sample backend with a $\pi$RL-style Flow-SDE backend so that GRPO, PPO, or other true policy-gradient updates become feasible on $\pi_{0.5}$. Second, test whether two or more frozen providers improve robustness through disagreement-aware verification rather than a single GE-Sim predictor. Third, study learned selector policies and explicit safety monitors such as feature-based failure detectors. These are valuable follow-on projects, but excluding them from the main paper keeps the current proposal focused and testable.
 
 \section{Conclusion}
-CAVER asks one focused question that is both scientifically interesting and realistically executable: under the same trusted-execution budget, can selective execution plus doubly robust correction produce a better post-training signal for a flow-based VLA than direct real-only updates? The current strict Stage-0 LIBERO result answers that question positively in the sample-efficiency sense: CAVER reaches slightly better held-out test success than the matched real-only baseline while using about one eleventh as many admitted demo items and primitive steps in the unchanged backend. That is enough to close the simulation-first validation stage and justify the next PiPER transfer study, but it is not enough to justify a claim of dominant raw success. The paper should say exactly that.
+CAVER asks one focused question that is both scientifically interesting and realistically executable: under the same trusted-execution budget, can selective execution plus calibrated admission produce a better post-training signal for a flow-based VLA than direct executed-trajectory updates? The current Stage-0 LIBERO result gives a mixed but useful answer. Strict CAVER does not dominate raw held-out success, and vanilla $K=1$ is a competitive simulation baseline. However, strict CAVER remains in the same held-out-success band while admitting roughly an order of magnitude fewer demo items and primitive steps into the unchanged backend. CAVER+FASR is the strongest current method pass: at $N=25$ it reaches held-out test $0.237$ versus $0.227$ for vanilla $K=1$, while using $3149$ primitive backend steps instead of $7521$; at $N=50$ it reaches $0.240$ versus $0.227$ while using $3110$ primitive steps instead of $15238$. The completed $K=1$+FASR control at $N=25$ reaches $0.223$, so the improvement is not explained by FASR on a single sampled chunk. The unresolved simulation-side check is uniform $K=4$+FASR, which is currently being rerun after RDSS copy-back failures. The current paper should therefore claim simulation-supported selective-admission/sample-efficiency evidence with CAVER+FASR as the main Stage-0 empirical method, not broad raw success-rate superiority. That is enough to justify Stage-1 readiness and a gated PiPER pilot, but not an immediate full three-task hardware study. Before that full study, FASR's progress-label assumption should be audited in shadow mode and compared against strict CAVER in a small one-task pilot.
 
 \appendix
-\section{Concrete operational definitions for the current $\pi_{0.5}$ + GE-Sim + PiPER instantiation}
+\section{Concrete operational definitions for the current \texorpdfstring{$\pi_{0.5}$}{pi0.5} + GE-Sim + PiPER instantiation}
 This appendix gathers the implementation choices that must be interpreted literally for the concrete study pinned in the main text. They instantiate the abstract interfaces $\Gamma_{\mathrm{exec}}$, $\Phi_{\Omega}$, $S_{\mathrm{safe}}$, and $M_{\mathrm{task}}$ on the current PiPER hardware stack.
 
 \subsection{Concrete PiPER execution semantics}
@@ -1155,6 +1410,26 @@ The following constants are interpreted literally in the implementation:
     \item marker-confidence audit threshold 0.90, with audit triggered if more than 3 of the final 10 frames fall below it.
 \end{itemize}
 
+\subsection{Concrete PiPER progress labels for FASR}
+PiPER does not provide FASR progress labels by itself. The current Stage-1 plan derives them from calibrated object and target poses, using AprilTag or ArUco markers on the manipulated objects and target fixtures when needed. All progress scores are computed on the local robot-control machine from trusted camera observations, not from GE-Sim predictions. If marker confidence is below the audit threshold for a frame, that frame is ignored for progress-endpoint selection; if too many frames are low confidence, the trace is ineligible for FASR and falls back to strict CAVER.
+
+Each task exposes a scalar $q_f(t)\in[0,1]$ at frame, primitive-step, or chunk index $t$. The score is smoothed with a 3-frame median filter and normalized relative to the initial state, so only \emph{improvement} from the start can create a repair prefix. The concrete planned scores are:
+\begin{table}[H]
+\centering
+\small
+\caption{PiPER progress labels planned for CAVER+FASR. These are readiness-gated diagnostics, not learned rewards. If a score cannot be validated against manual prefix audits, FASR is disabled for that task.\label{tab:piper_progress_labels}}
+\begin{tabularx}{\linewidth}{@{}p{2.7cm}p{4.3cm}X@{}}
+\toprule
+Task & Required tracked poses & Progress score $q_f(t)$ \\
+\midrule
+Block-to-tray & block pose, tray center, tray rim/floor plane & Normalized reduction in block-to-tray XY distance, plus bonuses for being inside the tray XY polygon and near the tray floor. \\
+Can-to-bowl & can pose, bowl center, bowl rim/floor plane & Normalized reduction in can-to-bowl XY distance, plus bonuses for being inside the bowl rim projection and near the bowl floor. \\
+Two-block stack & top-block pose, bottom-block pose, table plane & Normalized reduction in top-to-bottom XY offset, plus bonuses for top block above bottom block, correct height gap, and stable final orientation. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+For FASR, the implementation records the full progress sequence $\{q_f(t)\}$, the selected endpoint $t^*$, the progress gain $\Delta q^*$, marker-confidence summaries, and a reason code for acceptance or rejection. A failed episode can enter $\mathcal M^{\mathrm{rep}}$ only if this logged progress trace passes the same eligibility rule as Table~\ref{tab:fasr_params}. Manual audits are used only to validate the progress-label system before budgeted learning; they do not modify action choices or training examples inside the matched-budget study.
 
 \subsection{Safety shield and abort rules}
 The deterministic safety shield is part of the reproducible protocol. A candidate chunk is safety-approved only if it passes all five checks in Step~4b. The exact constants are:

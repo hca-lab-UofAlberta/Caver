@@ -30,9 +30,13 @@ FLAG_OPTIONS = {
     "--exact-no-nft-loss",
     "--exact-add-value-head",
     "--exact-value-after-vlm",
+    "--trace-stage0-progress",
     "--no-require-candidate-bank",
     "--skip-online",
     "--skip-backend-train",
+    "--skip-backend-update",
+    "--skip-dr-calibrator-fit",
+    "--skip-lvd-selector-fit",
     "--dry-run",
 }
 TRACE_INPUT_FORMAT = "stagee_trace_source_manifest_v1"
@@ -77,7 +81,48 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
             "completed caver_round_summary.json before rerunning that round."
         ),
     )
+    parser.add_argument(
+        "--finalizer-skip-backend-update",
+        action="store_true",
+        help=(
+            "Run the final --skip-online artifact pass through admitted-demo conversion, "
+            "but skip the backend training launch."
+        ),
+    )
+    parser.add_argument(
+        "--finalizer-skip-backend-train",
+        action="store_true",
+        help=(
+            "Run the final --skip-online artifact pass without admitted-demo conversion "
+            "or backend training. Use this for CPU-only reprocess jobs that only need "
+            "round/admission artifacts for a later post-train job."
+        ),
+    )
+    parser.add_argument(
+        "--disable-lagged-dr",
+        action="store_true",
+        help=(
+            "Do not pass seed or fitted DR calibrators into subrounds/finalizer. "
+            "This keeps the value proxy active while removing lagged DR correction."
+        ),
+    )
+    parser.add_argument(
+        "--disable-lagged-lvd",
+        action="store_true",
+        help=(
+            "Do not fit/pass round-to-round CAVER-LVD selector models. "
+            "Only the explicitly supplied --lvd-selector-model-path is used."
+        ),
+    )
+    parser.add_argument(
+        "--lvd-target-source",
+        default="dr_clipped",
+        choices=("dr_clipped", "dr_raw", "observed_selected_else_nuisance", "nuisance"),
+        help="Target source for lagged LVD selector fitting.",
+    )
     parsed, remaining = parser.parse_known_args(argv)
+    if parsed.finalizer_skip_backend_train and parsed.finalizer_skip_backend_update:
+        parser.error("--finalizer-skip-backend-train and --finalizer-skip-backend-update are mutually exclusive")
     return parsed, remaining
 
 
@@ -200,6 +245,16 @@ def append_trace(dst: Path, src: Path) -> int:
     return written
 
 
+def resolve_round_demo_trace_path(round_results_dir: Path) -> Path:
+    gzip_path = round_results_dir / "caver_online_demo_chunks.jsonl.gz"
+    if gzip_path.exists():
+        return gzip_path
+    plain_path = round_results_dir / "caver_online_demo_chunks.jsonl"
+    if plain_path.exists():
+        return plain_path
+    return round_results_dir / "caver_online_chunks.jsonl"
+
+
 def summarize_round(round_results_dir: Path) -> dict[str, Any]:
     online_path = round_results_dir / "caver_online_eval.json"
     summary_path = round_results_dir / "caver_round_summary.json"
@@ -247,6 +302,7 @@ def main(argv: list[str]) -> int:
     workdir = Path.cwd().resolve()
     repo_root = Path(__file__).resolve().parents[2]
     runner_path = repo_root / "scripts" / "stagee" / "run_stage0_caver_round.sh"
+    lvd_fit_path = repo_root / "scripts" / "stagee" / "run_fit_stagee_lvd_selector.sh"
 
     total_contexts = int(runner_options["--max-contexts"])
     round_size = int(runner_options.get("--round-size", "25"))
@@ -271,20 +327,30 @@ def main(argv: list[str]) -> int:
 
     manifest_path = resolve_path(workdir, runner_options.get("--manifest-path"))
     value_proxy_model_path = resolve_path(workdir, runner_options.get("--value-proxy-model-path"))
-    initial_dr_calibrator_model_path = resolve_path(workdir, runner_options.get("--dr-calibrator-model-path"))
+    initial_dr_calibrator_model_path = (
+        None if wrapper_args.disable_lagged_dr else resolve_path(workdir, runner_options.get("--dr-calibrator-model-path"))
+    )
+    initial_lvd_selector_model_path = resolve_path(workdir, runner_options.get("--lvd-selector-model-path"))
     value_proxy_model_path_str, value_proxy_model_id = load_value_proxy_metadata(value_proxy_model_path)
     (
         initial_dr_calibrator_model_path_str,
         initial_dr_calibrator_model_id,
     ) = load_value_proxy_metadata(initial_dr_calibrator_model_path)
+    (
+        initial_lvd_selector_model_path_str,
+        initial_lvd_selector_model_id,
+    ) = load_value_proxy_metadata(initial_lvd_selector_model_path)
 
     lagged_round_reports: list[dict[str, Any]] = []
     round_trace_paths: list[Path] = []
+    round_demo_trace_paths: list[Path] = []
     merged_contexts: list[dict[str, Any]] = []
     previous_calibrator_path = initial_dr_calibrator_model_path
+    previous_lvd_selector_path = initial_lvd_selector_model_path
     round_count = (total_contexts + round_size - 1) // round_size
 
     base_subround_options = remove_option(runner_options, "--dr-calibrator-model-path")
+    base_subround_options = remove_option(base_subround_options, "--lvd-selector-model-path")
     for round_zero_index in range(round_count):
         round_index = round_zero_index + 1
         round_context_offset = context_offset + (round_zero_index * round_size)
@@ -301,6 +367,12 @@ def main(argv: list[str]) -> int:
                 subround_options,
                 "--dr-calibrator-model-path",
                 str(previous_calibrator_path),
+            )
+        if previous_lvd_selector_path is not None:
+            subround_options = set_option(
+                subround_options,
+                "--lvd-selector-model-path",
+                str(previous_lvd_selector_path),
             )
 
         subround_cmd = [str(runner_path), *options_to_tokens(subround_options)]
@@ -320,14 +392,24 @@ def main(argv: list[str]) -> int:
                 round_report["input_dr_calibrator_path"] = (
                     None if previous_calibrator_path is None else str(previous_calibrator_path)
                 )
+                round_report["input_lvd_selector_path"] = (
+                    None if previous_lvd_selector_path is None else str(previous_lvd_selector_path)
+                )
                 next_calibrator_path = round_results_dir / "caver_lagged_dr_calibrator.json"
-                if next_calibrator_path.exists():
+                if (not wrapper_args.disable_lagged_dr) and next_calibrator_path.exists():
                     previous_calibrator_path = next_calibrator_path.resolve()
                     round_report["output_dr_calibrator_path"] = str(previous_calibrator_path)
                 else:
                     round_report["output_dr_calibrator_path"] = None
+                next_lvd_selector_path = round_results_dir / "caver_lvd_selector.json"
+                if (not wrapper_args.disable_lagged_lvd) and next_lvd_selector_path.exists():
+                    previous_lvd_selector_path = next_lvd_selector_path.resolve()
+                    round_report["output_lvd_selector_path"] = str(previous_lvd_selector_path)
+                else:
+                    round_report["output_lvd_selector_path"] = None
                 lagged_round_reports.append(round_report)
                 round_trace_paths.append(round_results_dir / "caver_online_chunks.jsonl")
+                round_demo_trace_paths.append(resolve_round_demo_trace_path(round_results_dir))
                 merged_contexts.extend(list(round_report["online"]["contexts"]))
                 continue
 
@@ -352,19 +434,49 @@ def main(argv: list[str]) -> int:
             round_report["input_dr_calibrator_path"] = (
                 None if previous_calibrator_path is None else str(previous_calibrator_path)
             )
+            round_report["input_lvd_selector_path"] = (
+                None if previous_lvd_selector_path is None else str(previous_lvd_selector_path)
+            )
             next_calibrator_path = round_results_dir / "caver_lagged_dr_calibrator.json"
-            if next_calibrator_path.exists():
+            if (not wrapper_args.disable_lagged_dr) and next_calibrator_path.exists():
                 previous_calibrator_path = next_calibrator_path.resolve()
                 round_report["output_dr_calibrator_path"] = str(previous_calibrator_path)
             else:
                 round_report["output_dr_calibrator_path"] = None
+            next_lvd_selector_path = round_results_dir / "caver_lvd_selector.json"
+            next_lvd_selector_summary_path = round_results_dir / "caver_lvd_selector.summary.json"
+            if (
+                not wrapper_args.disable_lagged_lvd
+                and str(runner_options.get("--selection-policy", "")) == "caver_lvd"
+                and "--skip-lvd-selector-fit" not in runner_options
+            ):
+                lvd_fit_cmd = [
+                    str(lvd_fit_path),
+                    "--dataset-path",
+                    str(round_results_dir / "caver_dr_candidate_dataset.jsonl"),
+                    "--output-path",
+                    str(next_lvd_selector_path),
+                    "--summary-path",
+                    str(next_lvd_selector_summary_path),
+                    "--target-source",
+                    str(wrapper_args.lvd_target_source),
+                ]
+                log(f"[stagee-lagged] lvd selector command: {' '.join(shlex.quote(part) for part in lvd_fit_cmd)}")
+                subprocess.run(lvd_fit_cmd, check=True, cwd=str(repo_root))
+            if (not wrapper_args.disable_lagged_lvd) and next_lvd_selector_path.exists():
+                previous_lvd_selector_path = next_lvd_selector_path.resolve()
+                round_report["output_lvd_selector_path"] = str(previous_lvd_selector_path)
+            else:
+                round_report["output_lvd_selector_path"] = None
             lagged_round_reports.append(round_report)
             round_trace_paths.append(round_results_dir / "caver_online_chunks.jsonl")
+            round_demo_trace_paths.append(resolve_round_demo_trace_path(round_results_dir))
             merged_contexts.extend(list(round_report["online"]["contexts"]))
 
     merged_online_path = overall_results_dir / "caver_online_eval.json"
     merged_context_path = overall_results_dir / "caver_online_contexts.jsonl"
     merged_trace_path = overall_results_dir / "caver_online_chunks.jsonl"
+    merged_demo_trace_path = overall_results_dir / "caver_online_demo_chunks.jsonl"
     merge_report_path = overall_results_dir / "lagged_round_chain.summary.json"
 
     if not wrapper_args.dry_run:
@@ -382,21 +494,45 @@ def main(argv: list[str]) -> int:
             "value_proxy_model_id": value_proxy_model_id,
             "dr_calibrator_model_path": initial_dr_calibrator_model_path_str,
             "dr_calibrator_model_id": initial_dr_calibrator_model_id,
+            "lvd_selector_model_path": initial_lvd_selector_model_path_str,
+            "lvd_selector_model_id": initial_lvd_selector_model_id,
+            "lvd_target_source": str(wrapper_args.lvd_target_source),
             "num_steps_wait": int(runner_options.get("--num-steps-wait", "10")),
             "replan_steps": int(runner_options.get("--replan-steps", "4")),
             "resize_size": int(runner_options.get("--resize-size", "224")),
             "resolution": int(runner_options.get("--resolution", "256")),
+            "trace_stage0_progress": bool(runner_options.get("--trace-stage0-progress", False)),
+            "repair_min_progress": (
+                None
+                if runner_options.get("--repair-min-progress") is None
+                else float(runner_options["--repair-min-progress"])
+            ),
+            "repair_min_primitive_steps": (
+                None
+                if runner_options.get("--repair-min-primitive-steps") is None
+                else int(runner_options["--repair-min-primitive-steps"])
+            ),
+            "repair_max_regression": (
+                None
+                if runner_options.get("--repair-max-regression") is None
+                else float(runner_options["--repair-max-regression"])
+            ),
             "max_steps_override": (
                 None if runner_options.get("--max-env-steps") is None else int(runner_options["--max-env-steps"])
             ),
             "video_dir": None,
             "save_failures_only": False,
             "lagged_round_driver": "stage0_caver_lagged_budget_v1",
+            "disable_lagged_dr": bool(wrapper_args.disable_lagged_dr),
+            "disable_lagged_lvd": bool(wrapper_args.disable_lagged_lvd),
             "lagged_round_count": round_count,
             "lagged_round_results_root": str(lagged_round_root),
             "lagged_round_result_dirs": [record["results_dir"] for record in lagged_round_reports],
             "final_round_dr_calibrator_path": (
                 None if previous_calibrator_path is None else str(previous_calibrator_path)
+            ),
+            "final_round_lvd_selector_path": (
+                None if previous_lvd_selector_path is None else str(previous_lvd_selector_path)
             ),
         }
         merged_online = build_online_results(
@@ -414,14 +550,23 @@ def main(argv: list[str]) -> int:
 
         if wrapper_args.trace_reference_mode == "manifest":
             write_trace_source_manifest_from_paths(manifest_path=merged_trace_path, trace_paths=round_trace_paths)
+            write_trace_source_manifest_from_paths(manifest_path=merged_demo_trace_path, trace_paths=round_demo_trace_paths)
         else:
             merged_trace_path.unlink(missing_ok=True)
+            merged_demo_trace_path.unlink(missing_ok=True)
             total_trace_records = 0
             for trace_path in round_trace_paths:
                 total_trace_records += append_trace(merged_trace_path, trace_path)
+            total_demo_trace_records = 0
+            for trace_path in round_demo_trace_paths:
+                total_demo_trace_records += append_trace(merged_demo_trace_path, trace_path)
             log(
                 f"[stagee-lagged] materialized merged trace at {merged_trace_path} "
                 f"(records={total_trace_records})"
+            )
+            log(
+                f"[stagee-lagged] materialized merged demo trace at {merged_demo_trace_path} "
+                f"(records={total_demo_trace_records})"
             )
 
         merge_report = {
@@ -429,6 +574,7 @@ def main(argv: list[str]) -> int:
             "overall_results_dir": str(overall_results_dir),
             "lagged_round_root": str(lagged_round_root),
             "trace_reference_mode": wrapper_args.trace_reference_mode,
+            "merged_demo_trace_path": str(merged_demo_trace_path),
             "seed": seed,
             "context_offset": context_offset,
             "total_contexts": total_contexts,
@@ -440,8 +586,16 @@ def main(argv: list[str]) -> int:
             "value_proxy_model_id": value_proxy_model_id,
             "initial_dr_calibrator_model_path": initial_dr_calibrator_model_path_str,
             "initial_dr_calibrator_model_id": initial_dr_calibrator_model_id,
+            "initial_lvd_selector_model_path": initial_lvd_selector_model_path_str,
+            "initial_lvd_selector_model_id": initial_lvd_selector_model_id,
+            "lvd_target_source": str(wrapper_args.lvd_target_source),
+            "disable_lagged_dr": bool(wrapper_args.disable_lagged_dr),
+            "disable_lagged_lvd": bool(wrapper_args.disable_lagged_lvd),
             "final_round_dr_calibrator_path": (
                 None if previous_calibrator_path is None else str(previous_calibrator_path)
+            ),
+            "final_round_lvd_selector_path": (
+                None if previous_lvd_selector_path is None else str(previous_lvd_selector_path)
             ),
             "rounds": [
                 {
@@ -451,6 +605,8 @@ def main(argv: list[str]) -> int:
                     "results_dir": record["results_dir"],
                     "input_dr_calibrator_path": record["input_dr_calibrator_path"],
                     "output_dr_calibrator_path": record["output_dr_calibrator_path"],
+                    "input_lvd_selector_path": record.get("input_lvd_selector_path"),
+                    "output_lvd_selector_path": record.get("output_lvd_selector_path"),
                     "online_successes": record["online"]["summary"]["successes"],
                     "online_episodes_run": record["online"]["summary"]["episodes_run"],
                     "contexts_admitted": record["summary"]["admission"]["contexts_admitted"],
@@ -464,11 +620,21 @@ def main(argv: list[str]) -> int:
 
     finalizer_options = collections.OrderedDict(runner_options)
     finalizer_options = remove_option(finalizer_options, "--dr-calibrator-model-path")
+    finalizer_options = remove_option(finalizer_options, "--lvd-selector-model-path")
     finalizer_options = remove_option(finalizer_options, "--skip-online")
     finalizer_options = remove_option(finalizer_options, "--skip-backend-train")
     finalizer_options = remove_option(finalizer_options, "--dry-run")
     finalizer_options = set_option(finalizer_options, "--results-dir", str(overall_results_dir))
+    finalizer_options = set_option(finalizer_options, "--demo-trace-path", str(merged_demo_trace_path))
     finalizer_options["--skip-online"] = True
+    if wrapper_args.disable_lagged_dr:
+        finalizer_options["--skip-dr-calibrator-fit"] = True
+    if previous_lvd_selector_path is not None:
+        finalizer_options = set_option(finalizer_options, "--lvd-selector-model-path", str(previous_lvd_selector_path))
+    if wrapper_args.finalizer_skip_backend_train:
+        finalizer_options["--skip-backend-train"] = True
+    elif wrapper_args.finalizer_skip_backend_update:
+        finalizer_options["--skip-backend-update"] = True
     finalizer_cmd = [str(runner_path), *options_to_tokens(finalizer_options)]
     log(f"[stagee-lagged] finalizer command: {' '.join(shlex.quote(part) for part in finalizer_cmd)}")
 
@@ -478,11 +644,18 @@ def main(argv: list[str]) -> int:
             "overall_results_dir": str(overall_results_dir),
             "round_count": round_count,
             "trace_reference_mode": wrapper_args.trace_reference_mode,
+            "finalizer_skip_backend_update": bool(wrapper_args.finalizer_skip_backend_update),
+            "finalizer_skip_backend_train": bool(wrapper_args.finalizer_skip_backend_train),
+            "disable_lagged_dr": bool(wrapper_args.disable_lagged_dr),
+            "disable_lagged_lvd": bool(wrapper_args.disable_lagged_lvd),
             "subround_commands": [],
-            "finalizer_command": finalizer_cmd,
+            "finalizer_command": [],
         }
         previous_dry_run_calibrator = (
             None if initial_dr_calibrator_model_path is None else str(initial_dr_calibrator_model_path)
+        )
+        previous_dry_run_lvd_selector = (
+            None if initial_lvd_selector_model_path is None else str(initial_lvd_selector_model_path)
         )
         for round_zero_index in range(round_count):
             round_index = round_zero_index + 1
@@ -494,11 +667,20 @@ def main(argv: list[str]) -> int:
             subround_options = set_option(subround_options, "--context-offset", str(round_context_offset))
             subround_options = set_option(subround_options, "--max-contexts", str(round_context_count))
             subround_options["--skip-backend-train"] = True
-            if previous_dry_run_calibrator is not None:
+            if (not wrapper_args.disable_lagged_dr) and previous_dry_run_calibrator is not None:
                 subround_options = set_option(
                     subround_options,
                     "--dr-calibrator-model-path",
                     previous_dry_run_calibrator,
+                )
+            if (
+                str(runner_options.get("--selection-policy", "")) == "caver_lvd"
+                and previous_dry_run_lvd_selector is not None
+            ):
+                subround_options = set_option(
+                    subround_options,
+                    "--lvd-selector-model-path",
+                    previous_dry_run_lvd_selector,
                 )
             dry_run_payload["subround_commands"].append(
                 {
@@ -508,7 +690,28 @@ def main(argv: list[str]) -> int:
                     "command": [str(runner_path), *options_to_tokens(subround_options)],
                 }
             )
-            previous_dry_run_calibrator = str(round_results_dir / "caver_lagged_dr_calibrator.json")
+            previous_dry_run_calibrator = (
+                None
+                if wrapper_args.disable_lagged_dr
+                else str(round_results_dir / "caver_lagged_dr_calibrator.json")
+            )
+            if str(runner_options.get("--selection-policy", "")) == "caver_lvd":
+                if not wrapper_args.disable_lagged_lvd and "--skip-lvd-selector-fit" not in runner_options:
+                    previous_dry_run_lvd_selector = str(round_results_dir / "caver_lvd_selector.json")
+            else:
+                previous_dry_run_lvd_selector = None
+        dry_run_finalizer_options = collections.OrderedDict(finalizer_options)
+        dry_run_finalizer_options = remove_option(dry_run_finalizer_options, "--lvd-selector-model-path")
+        if (
+            str(runner_options.get("--selection-policy", "")) == "caver_lvd"
+            and previous_dry_run_lvd_selector is not None
+        ):
+            dry_run_finalizer_options = set_option(
+                dry_run_finalizer_options,
+                "--lvd-selector-model-path",
+                previous_dry_run_lvd_selector,
+            )
+        dry_run_payload["finalizer_command"] = [str(runner_path), *options_to_tokens(dry_run_finalizer_options)]
         print(json.dumps(dry_run_payload, indent=2))
         return 0
 

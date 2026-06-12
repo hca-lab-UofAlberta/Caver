@@ -1,0 +1,84 @@
+status: scaffold_only_not_for_real_runs
+ready_for_real_runs: false
+study_id: caver_piper_stage1_v1
+date: null
+operator: null
+robot: piper
+firmware_version: null
+urdf_file: null
+urdf_sha256: null
+
+software:
+  caver_repo_commit: null
+  openpi_commit: fdc03f527881cdfc8ae1a168ed6a20c60edbbbcc
+  gesim_commit: 0e0de7e2ed8ea04e6ba41d47c93964ae65e5fbd2
+  pi_step_nft_commit: 140eece2ef7e8574c34c69a221fd4e3f56c2423c
+  rlinf_commit: e62de7767f41a61d58eb15d916e8809c70610672
+
+configs:
+  policy_config: configs/pi05_piper_h4.py
+  policy_config_sha256: null
+  wovr_config: configs/wovr_piper_h4.yaml
+  wovr_config_sha256: null
+  camera_config: configs/camera/piper_multiview.yaml
+  camera_config_sha256: null
+  piper_tasks: configs/piper_tasks.yaml
+  piper_tasks_sha256: null
+
+models:
+  base_checkpoint: gs://openpi-assets/checkpoints/pi05_base/params
+  seed_checkpoint: null
+  current_checkpoint: null
+  gesim_weight_identifier: ge_sim_cosmos_v0.1.safetensors
+
+stage1_constants:
+  action_horizon: 4
+  action_dim: 7
+  chunk_dt_s: 0.1
+  provider_action_dim: 16
+  parked_gesim_dummy_pose: [0.8, -0.8, 0.3, 0.0, 0.0, 0.0, 1.0, 0.0]
+  tray_height_margin_m: 0.03
+  bowl_height_margin_m: 0.045
+  stack_planar_tolerance_m: 0.02
+  stack_height_gap_m: 0.03
+  marker_confidence_audit_threshold: 0.9
+  marker_low_confidence_frame_limit: 3
+
+safety:
+  joint_limits_source: fill_from_piper_ros_or_urdf_before_first_real_run
+  joint_limits_rad: null
+  arm_velocity_caps_rad_s: [1.0, 1.0, 1.0, 1.2, 1.2, 1.5]
+  gripper_velocity_cap_m_s: 0.05
+  arm_acceleration_caps_rad_s2: [4.0, 4.0, 4.0, 5.0, 5.0, 6.0]
+  gripper_acceleration_cap_m_s2: 0.25
+  workspace_x_m: [0.18, 0.55]
+  workspace_y_m: [-0.28, 0.28]
+  tool_height_m: [-0.005, 0.30]
+  self_collision_padding_m: 0.008
+  table_penetration_tolerance_m: 0.002
+  runtime_abort:
+    heartbeat_loss_s: 0.2
+    joint_tracking_error_rad: 0.15
+    tracking_window_s: 0.2
+
+seed_real_set:
+  total_contexts: 120
+  per_task: 40
+  tasks: [block_to_tray, can_to_bowl, two_block_stack]
+
+random_seeds:
+  policy_sampling: null
+  selector_sampling: null
+  bootstrap_masks: null
+  stepnft_sampling: null
+  eval_template_shuffle: null
+
+sdre:
+  account: p57098
+  project_path: /projects/p57098/euijin1/Caver
+  artifact_root: /rdss/p57098/euijin1/caver
+  preferred_remote_inference_partition: gpu-h200
+
+notes:
+  - Fill exact checksums, URDF values, and run-time seeds before the first real run.
+  - Replace scaffold status only after the local robot bridge and safety-authoritative path exist.

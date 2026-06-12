@@ -1,0 +1,86 @@
+{
+  "aggregate": [
+    {
+      "admitted_demo_items_mean": 400.3333333333333,
+      "budget": 25,
+      "method": "k1_fasr",
+      "n_seeds": 3,
+      "primitive_steps_mean": 1585.6666666666667,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22333333333333336,
+      "test_sem": 0.002721655269759089,
+      "validation_mean": 0.20333333333333334,
+      "validation_sem": 0.005443310539518171
+    }
+  ],
+  "methods": {
+    "k1_fasr": "Vanilla K=1 + FASR"
+  },
+  "missing_cells": [],
+  "note": "This is the held-out checkpoint curve needed for sample-efficiency claims. It is distinct from the within-run online trajectory diagnostic.",
+  "rows": [
+    {
+      "admitted_demo_items": 394,
+      "budget": 25,
+      "contexts_covered": 10,
+      "method": "k1_fasr",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 1561,
+      "run_dir": "/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed7__budget25__20260609T164124Z",
+      "seed": 7,
+      "summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed7__budget25__20260609T164124Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 389,
+      "budget": 25,
+      "contexts_covered": 11,
+      "method": "k1_fasr",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 1542,
+      "run_dir": "/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed13__budget25__20260609T164124Z",
+      "seed": 13,
+      "summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed13__budget25__20260609T164124Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 418,
+      "budget": 25,
+      "contexts_covered": 9,
+      "method": "k1_fasr",
+      "online_success_rate": 0.36,
+      "online_successes": 9,
+      "primitive_steps_total": 1654,
+      "run_dir": "/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed29__budget25__20260609T164124Z",
+      "seed": 29,
+      "summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_fairness_posttrain_recovery_projectckpt_v1/stagee__caver-lagged__manifest-t_train_s0-all-k1-fasr-n25__seed29__budget25__20260609T164124Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    }
+  ],
+  "workflow": "stagee_heldout_budget_curve_v1",
+  "x_axis": "trusted execution contexts N"
+}

@@ -20,20 +20,23 @@ This repository is currently focused on Stage 0. PiPER is not the active path ye
 
 ## Status
 
-As of `2026-04-13`:
+As of `2026-05-11`:
 
 - SDRE-native setup for `openpi`, `LIBERO`, `pi-StepNFT`, and `GE-Sim` is in place.
-- Real-only and single-round provider-aware CAVER runs complete end to end on `gpu-l40s`.
-- The GE-Sim live-provider path is stable with split-GPU routing and RDSS-backed provider bundles.
-- The proposal-required round-1 seed calibrator path is now also validated:
+- Real-only and provider-aware lagged CAVER Stage-0 runs are implemented and have completed the main `N=50` LIBERO comparison over seeds `{7,13,29}`.
+- The current completed result supports a narrow admitted-update-data efficiency claim: CAVER roughly matches held-out performance while admitting about `11x` fewer backend demo items / primitive steps than real-only.
+- The GE-Sim live-provider path is stable with RDSS-backed provider bundles; longer budget-curve jobs have been using `gpu-h200` when L40S capacity or memory/headroom is less convenient.
+- The proposal-required round-1 seed calibrator path is validated:
   - seed artifact: `metadata/stage0/calibrator/stage0_seed_dr_calibrator_mlp_v2.json`
   - validation smoke: job `5887`
   - result: `COMPLETED`, `1/5` successes, selector mode `lagged_dr_calibrated_softmax_v1`, next-round calibrator fit succeeded
-- The strict proposal-mainline launch path is now encoded in the Stage-E budget submitters:
+- The proposal-aligned launch path is encoded in the Stage-E budget submitters:
   - `scripts/slurm/submit_stage0_caver_budget.sh --proposal-mainline`
   - `scripts/slurm/submit_stage0_real_only_budget.sh --proposal-mainline`
-- The remaining gate before PiPER is empirical, not orchestration:
-  - rerun the Stage-E comparison under that proposal-mainline path and judge whether the simulation result is strong enough to freeze for transfer.
+- The remaining gates before a full PiPER study are empirical and diagnostic:
+  - finish or recover the CAVER held-out budget-curve cells at `N=25` and `N=100`
+  - inspect the current conservative-admission family skew
+  - keep Stage F to readiness/shadow/pilot work until those diagnostics are clear
 
 If you want the detailed chronology, read:
 

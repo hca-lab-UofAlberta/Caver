@@ -62,6 +62,7 @@ Backend update options:
   --backend-task-suite NAME
   --backend-task-ids IDS
   --experiment-name NAME
+  --run-label-suffix TOKEN    Optional sanitized suffix appended to the run task token
   --train-envs COUNT
   --eval-envs COUNT
   --runner-max-steps COUNT
@@ -130,6 +131,7 @@ model_path="/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-asset
 backend_task_suite=""
 backend_task_ids=""
 experiment_name="stage0_real_only_round"
+run_label_suffix=""
 train_envs="1"
 eval_envs="1"
 runner_max_steps="1"
@@ -336,6 +338,10 @@ while (($# > 0)); do
       experiment_name="${2:?missing value for --experiment-name}"
       shift 2
       ;;
+    --run-label-suffix)
+      run_label_suffix="${2:?missing value for --run-label-suffix}"
+      shift 2
+      ;;
     --train-envs)
       train_envs="${2:?missing value for --train-envs}"
       shift 2
@@ -413,6 +419,10 @@ if [ -n "${manifest_path}" ]; then
 else
   task_token="$(printf "%s" "${task_suite}-task-${task_ids}" | sed -E 's/[^A-Za-z0-9._-]+/-/g')"
   budget_token="${num_trials_per_task}"
+fi
+if [ -n "${run_label_suffix}" ]; then
+  run_label_suffix="$(printf "%s" "${run_label_suffix}" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+  task_token="${task_token}-${run_label_suffix}"
 fi
 
 stamp="$(timestamp_utc)"

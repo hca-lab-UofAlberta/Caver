@@ -1,0 +1,2011 @@
+## Direct answer
+
+Use **SDRE for simulation, training, calibration, checkpoint updates, and possibly remote inference**, but do **not** let SDRE directly control the physical PiPER arm.
+
+The safe architecture is:
+
+[
+\text{PiPER + cameras} \rightarrow \textbf{local robot-control PC} \leftrightarrow \textbf{learning service / SDRE}
+]
+
+The **local robot-control PC** should be the only machine physically connected to the robot through USB-CAN and the only machine allowed to publish motion commands. SDRE can train models and return checkpoints, scores, or candidate selections, but the final command must always be checked and executed locally. This matches your CAVER proposal’s two-machine design: robot-control machine on **Ubuntu 20.04 + ROS Noetic**, learning machine on **Ubuntu 22.04 + GPU**.
+
+The reason is practical and safety-related. PiPER’s official ROS stack is on the `noetic` branch, uses CAN activation scripts, exposes ROS services/topics for enabling, stopping, resetting, and publishing joint commands, and warns that publishing joint messages can physically move the arm. That belongs on a local machine beside the robot, not inside a queued cluster job. ([GitHub][1])
+
+SDRE is still very useful. Public UAlberta pages describe SDRE as secure high-performance research infrastructure with NVIDIA **H200** and **L40S** GPU nodes, and your workload needs that kind of GPU capacity for OpenPI / GE-Sim / post-training. OpenPI’s own repo says inference needs more than 8 GB GPU memory, LoRA fine-tuning needs more than 22.5 GB, full fine-tuning needs more than 70 GB, and the repo is tested on Ubuntu 22.04. ([University of Alberta][2])
+
+So the right mental model is:
+
+> **Robot-control is local and safety-critical. Learning is remote and GPU-heavy. CAVER connects them at round boundaries or through a carefully controlled inference API, never by giving the cluster raw authority over the robot.**
+
+---
+
+# 0. The overall architecture you should build
+
+## Recommended architecture for the first real-robot stage
+
+Use four layers.
+
+```text
+Layer 1: Physical robot layer
+  PiPER arm, gripper, cameras, calibration board/tags, table, objects, emergency stop
+
+Layer 2: Local robot-control machine
+  Ubuntu 20.04
+  ROS Noetic
+  piper_sdk / piper_ros
+  camera drivers
+  CAVER robot bridge
+  hard safety shield
+  runtime abort monitor
+  logging
+
+Layer 3: Learning / inference layer
+  Prefer local GPU workstation if available
+  Otherwise SDRE interactive GPU job or SDRE batch jobs
+  openpi
+  GE-Sim
+  CAVER selector/calibrator
+  StepNFT-style training
+
+Layer 4: Experiment/data layer
+  manifest.lock
+  logs
+  trajectories
+  candidate chunks
+  propensities
+  outcomes
+  model checkpoints
+  SDRE storage and backup
+```
+
+The most important rule is:
+
+> **Only the local robot-control machine may execute robot commands.**
+
+Even if SDRE computes the candidate action, the local machine must still run:
+
+[
+S_{\mathrm{safe}}(a, s^{\mathrm{prop}}) \in {0,1}
+]
+
+before anything reaches the robot. This is exactly how the proposal defines CAVER: raw policy actions are converted by an execution adapter (\Gamma_{\mathrm{exec}}), checked by a deterministic safety shield (S_{\mathrm{safe}}), and only then executed.
+
+---
+
+# 1. Can the robot be connected directly to SDRE?
+
+## My recommendation: no, not directly
+
+Do **not** try to connect the PiPER arm itself to SDRE as if the cluster were the robot-control machine.
+
+Reasons:
+
+1. **The robot uses local hardware I/O.**
+   PiPER control goes through USB-CAN / CAN interfaces. The official PiPER ROS instructions include CAN activation, CAN device naming, and ROS control nodes. Those are local hardware operations. ([GitHub][1])
+
+2. **SDRE is a shared cluster environment.**
+   Cluster jobs run through Slurm-like scheduling. General HPC guidance is that when you SSH into a cluster you land on a login node, and computational work should run through interactive or batch jobs, not directly on the login node. That model is not designed for real-time robot actuation. ([Mint Research Computing][3])
+
+3. **Network latency and job scheduling are unsafe for servo control.**
+   Your PiPER executor needs to stream commands locally at 10 Hz in the proposal. A Slurm job can be delayed, preempted, disconnected, or placed on a node that changes between jobs. That is fine for training; it is not fine for low-level robot motion.
+
+4. **Security policy may forbid inbound/outbound robot connections.**
+   I could not fetch your exact SDRE orientation page with the browsing tool, so you should confirm SDRE-specific rules with the SDRE administrators. In general, secure research environments often restrict inbound services, tunnels, exposed ports, and hardware passthrough.
+
+## What is allowed conceptually
+
+You can use SDRE in three safe ways.
+
+### Mode A: SDRE for offline training only — safest and recommended first
+
+1. The local robot-control PC runs the robot.
+2. It logs trajectories, images, candidate chunks, propensities, and outcomes.
+3. You upload logs to SDRE.
+4. SDRE trains/refits the calibrator and updates LoRA checkpoints.
+5. You download the new checkpoint to the robot-control side.
+6. Next real-robot round uses the new checkpoint.
+
+This is the best first implementation.
+
+### Mode B: SDRE as a remote inference service — possible, but only after approval
+
+You reserve an SDRE GPU interactively for the duration of a robot session, run a model server on that compute node, and the local robot-control machine sends observations to it and receives candidate scores or actions.
+
+This can work only if:
+
+* SDRE permits the network/tunnel pattern,
+* the connection is stable,
+* every returned action is still checked locally,
+* the robot holds position or aborts on timeout,
+* and the cluster is never the final actuator.
+
+A common HPC pattern for interactive visualization is SSH tunneling from a compute node service back to a local browser; general cluster training materials describe finding the compute node and tunneling services such as TensorBoard through SSH. The same idea may be adapted for a model service, but only if SDRE permits it. ([Mint Research Computing][3])
+
+Mode B is closer to the final proposal-mainline CAVER loop than Mode A because it preserves online provider-backed candidate scoring. But it is still a **later** path in this repo. For `F0` and the first `F1` pilot, keep Mode A as the default unless you have all of the later-readiness items in Section 13.4 and the latency evidence in Section 13.5.
+
+### Mode C: SDRE directly controls ROS / CAN — do not do this
+
+This is the unsafe design. Avoid it.
+
+---
+
+# 2. What hardware you need before touching software
+
+Before installing anything, make an inventory.
+
+## Physical robot side
+
+You need:
+
+* PiPER arm
+* PiPER gripper
+* PiPER power supply
+* USB-to-CAN adapter
+* robot-control PC physically beside the arm
+* emergency stop or immediately reachable power cutoff
+* fixed table
+* task objects: block, tray, can, bowl, stack blocks
+* calibration board or AprilTag/ArUco board
+* object tags if using marker-based labeling
+* three fixed RGB cameras if following the proposal: `head`, `hand_left`, `hand_right`
+* enough lighting to make labels stable
+* cable management so the robot cannot catch cables
+
+## Robot-control PC
+
+Use:
+
+* Ubuntu 20.04
+* ROS Noetic
+* wired Ethernet if possible
+* USB ports for CAN adapter and cameras
+* no aggressive sleep mode / screen lock that suspends USB
+* enough disk for raw logs
+* ideally no heavy training on this machine
+
+The proposal’s current concrete plan explicitly separates a **robot-control machine** from a **learning machine**. The robot-control machine runs `piper_sdk`, `piper_ros`, camera drivers, the execution bridge, and reset/checklist UI; the learning machine runs OpenPI, GE-Sim, CAVER calibration, selector, replay buffer, and training.
+
+## Learning side
+
+Use SDRE for:
+
+* Stage-0 simulation jobs
+* GE-Sim inference experiments
+* utility-head fitting
+* calibrator fitting
+* StepNFT-style LoRA updates
+* ablations and plotting
+* storing checkpoints and logs
+
+OpenPI’s repo says it is tested on Ubuntu 22.04 and uses `uv`; it also gives GPU memory requirements for inference, LoRA fine-tuning, and full fine-tuning. ([GitHub][4])
+
+---
+
+# 3. Safety rules before first motion
+
+Do this before any learned policy touches the robot.
+
+## Minimum lab rules
+
+1. Never run robot experiments alone.
+2. One person is the operator; one person watches the arm.
+3. Everyone knows how to cut power.
+4. Keep hands out of the workspace when the arm is enabled.
+5. Start with `auto_enable:=false`.
+6. Start with no learned actions.
+7. Start with tiny scripted motions.
+8. Use low speed and small joint deltas.
+9. Log every command and every observed joint state.
+10. Disable the robot when debugging software.
+
+The official PiPER ROS README warns that publishing joint messages will make the arm lift and tells users to ensure no obstacles are in the working range. It also documents `/stop_srv` and `/reset_srv`, with reset immediately losing power and the arm falling. Treat those warnings seriously. ([GitHub][1])
+
+## Never let multiple programs command the arm
+
+Only one process should publish to the command topic. For CAVER, make one node authoritative:
+
+```text
+caver_robot_bridge
+  receives candidate chunk
+  checks safety
+  streams command
+  monitors feedback
+  logs outcome
+```
+
+Everything else should talk to that bridge, not directly to `/joint_states` or CAN.
+
+---
+
+# 4. Install the PiPER software on the local robot-control PC
+
+## 4.1 Install base packages
+
+On the robot-control PC:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  git curl wget build-essential cmake \
+  python3-pip python3-venv \
+  net-tools can-utils ethtool \
+  chrony
+```
+
+`chrony` is useful for time synchronization between logs and cameras.
+
+## 4.2 Install ROS Noetic
+
+Install ROS Noetic using the standard ROS installation path for Ubuntu 20.04. Then make sure this works:
+
+```bash
+source /opt/ros/noetic/setup.bash
+roscore
+```
+
+In another terminal:
+
+```bash
+rostopic list
+```
+
+Do not proceed until ROS works.
+
+## 4.3 Install `piper_sdk`
+
+The official SDK README says `python-can` should be above version 3.3.4 and provides both PyPI and GitHub installation paths. ([GitHub][5])
+
+Use:
+
+```bash
+python3 -m pip install --upgrade pip
+pip3 install python-can
+pip3 install piper_sdk
+```
+
+Or install from source:
+
+```bash
+mkdir -p ~/robot_posttrain_ws/third_party
+cd ~/robot_posttrain_ws/third_party
+
+git clone https://github.com/agilexrobotics/piper_sdk.git
+cd piper_sdk
+pip3 install .
+```
+
+Quick check:
+
+```bash
+python3 - <<'PY'
+import can
+import piper_sdk
+print("python-can ok")
+print("piper_sdk import ok")
+PY
+```
+
+## 4.4 Install `piper_ros`
+
+The official `piper_ros` repository targets ROS Noetic. It says to clone the repo, check out `noetic`, install dependencies, source ROS Noetic, and run `catkin_make`. It also notes that the default URDF depends on firmware version: newer firmware uses `piper_description.urdf`, older firmware may need `piper_description_old.urdf`. ([GitHub][1])
+
+Use:
+
+```bash
+cd ~/robot_posttrain_ws/third_party
+
+git clone https://github.com/agilexrobotics/piper_ros.git
+cd piper_ros
+git checkout noetic
+
+source /opt/ros/noetic/setup.bash
+
+sudo apt install -y \
+  python3-wstool python3-catkin-tools python3-rosdep \
+  ros-noetic-ruckig \
+  ros-noetic-eigen-stl-containers \
+  ros-noetic-geometric-shapes \
+  ros-noetic-moveit-msgs \
+  ros-noetic-srdfdom \
+  ros-noetic-pybind11-catkin \
+  ros-noetic-moveit-resources-panda-moveit-config \
+  ros-noetic-ompl \
+  ros-noetic-warehouse-ros \
+  ros-noetic-eigenpy \
+  ros-noetic-rosparam-shortcuts
+
+catkin_make
+```
+
+Add the workspace to your shell:
+
+```bash
+echo "source /opt/ros/noetic/setup.bash" >> ~/.bashrc
+echo "source ~/robot_posttrain_ws/third_party/piper_ros/devel/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+If MoveIt compilation fails, the official README says you can install the official MoveIt package and make ROS ignore the bundled MoveIt directory with `CATKIN_IGNORE`, then rebuild. ([GitHub][1])
+
+---
+
+# 5. Connect PiPER through CAN
+
+## 5.1 Physical connection
+
+1. Power off the robot.
+2. Connect USB-to-CAN adapter to the robot-control PC.
+3. Connect CAN side to PiPER.
+4. Power on the robot.
+5. Keep the workspace clear.
+6. Do **not** enable the arm yet.
+
+## 5.2 Find the CAN device
+
+From the `piper_ros` directory:
+
+```bash
+cd ~/robot_posttrain_ws/third_party/piper_ros
+
+bash find_all_can_port.sh
+```
+
+If there is only one CAN module, the official README says you can activate `can0` at baud rate `1000000`:
+
+```bash
+bash can_activate.sh can0 1000000
+```
+
+If there are multiple USB-CAN modules, the official README gives the safer bus-info procedure:
+
+```bash
+sudo ethtool -i can0 | grep bus
+```
+
+Suppose the bus-info is `1-2:1.0`. Then activate and rename:
+
+```bash
+bash can_activate.sh can_piper 1000000 "1-2:1.0"
+ifconfig can_piper
+```
+
+The official README explains this procedure and says the renamed CAN device should appear in `ifconfig`. ([GitHub][1])
+
+Optional passive check:
+
+```bash
+candump can_piper
+```
+
+If there are no frames, do not panic immediately; some frames may appear only after launching the control node. But if the interface is not present, fix CAN first.
+
+---
+
+# 6. Start ROS control without motion
+
+## 6.1 Start ROS master
+
+Terminal 1:
+
+```bash
+roscore
+```
+
+## 6.2 Launch PiPER control node with auto-enable off
+
+Terminal 2:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/robot_posttrain_ws/third_party/piper_ros/devel/setup.bash
+
+roslaunch piper start_single_piper.launch \
+  can_port:=can_piper \
+  auto_enable:=false
+```
+
+The official README documents `start_single_piper.launch`, the `can_port` argument, and `auto_enable`. It also says the same node can be started with `rosrun` or `roslaunch`. ([GitHub][1])
+
+## 6.3 Check topics and services
+
+Terminal 3:
+
+```bash
+rostopic list
+rosservice list
+```
+
+You should see topics/services similar to:
+
+```text
+/arm_status
+/enable_flag
+/end_pose
+/end_pose_euler
+/joint_states
+/joint_states_single
+/pos_cmd
+
+/enable_srv
+/go_zero_srv
+/gripper_srv
+/reset_srv
+/stop_srv
+```
+
+The official README lists these topics and services. ([GitHub][1])
+
+## 6.4 Read state only
+
+Do not move yet. Read status:
+
+```bash
+rostopic echo /arm_status
+rostopic echo /joint_states_single
+rostopic echo /end_pose
+```
+
+Record:
+
+* current joint positions
+* current gripper state
+* any error codes
+* firmware version if visible
+* URDF version used
+
+---
+
+# 7. First enable / disable test
+
+Only after the workspace is clear:
+
+```bash
+rosservice call /enable_srv "enable_request: true"
+```
+
+Then disable:
+
+```bash
+rosservice call /enable_srv "enable_request: false"
+```
+
+The official README documents both service calls and the equivalent `/enable_flag` topic. ([GitHub][1])
+
+Do this several times without motion. Confirm:
+
+* enable state changes
+* no unexpected motion
+* no error status
+* stop service works
+
+Test stop:
+
+```bash
+rosservice call /stop_srv
+```
+
+Do **not** use reset casually. The README says reset immediately loses power and the arm may fall. ([GitHub][1])
+
+---
+
+# 8. First motion test
+
+Do not start with CAVER. Do not start with OpenPI. Do not start with GE-Sim.
+
+Start with a vendor-supported small command, RViz, or a tiny scripted joint change. Keep the operator at the emergency stop.
+
+The official README shows that publishing a `sensor_msgs/JointState` to `/joint_states` can control movement, but it explicitly warns that the arm will lift and the workspace must be clear. ([GitHub][1])
+
+For your own tests, make a conservative wrapper instead of typing `rostopic pub` manually.
+
+Pseudo-logic:
+
+```python
+def send_joint_target(q_target, g_target):
+    q_obs = read_current_joint_state()
+
+    assert within_joint_limits(q_target)
+    assert max(abs(q_target - q_obs)) < SMALL_DELTA
+    assert within_gripper_limits(g_target)
+
+    # stream a slow interpolation from q_obs to q_target
+    for q in interpolate(q_obs, q_target, steps=20):
+        publish_joint_state(q, g_target)
+        sleep(0.05)
+```
+
+For the first day, use:
+
+* tiny joint deltas
+* no object interaction
+* no camera dependency
+* no learned actions
+* `auto_enable:=false` by default
+* manual enable only when ready
+
+---
+
+# 9. Build the local CAVER robot bridge
+
+Your bridge should be a local Python/ROS package. It should **not** be a quick script that directly publishes actions.
+
+## 9.1 Required modules
+
+Build these modules:
+
+```text
+caver_robot_bridge/
+  state_reader.py
+  camera_reader.py
+  action_receiver.py
+  safety_shield.py
+  executor_10hz.py
+  labeler.py
+  logger.py
+  experiment_state_machine.py
+```
+
+## 9.2 State machine
+
+Use a strict state machine:
+
+```text
+DISABLED
+  -> IDLE
+  -> ARMED
+  -> EXECUTING_CHUNK
+  -> HOLD
+  -> ABORT
+```
+
+Only `EXECUTING_CHUNK` may publish motion commands.
+
+Any of these should force `ABORT` or `HOLD`:
+
+* lost heartbeat
+* missing camera frame
+* missing joint state
+* unsafe candidate
+* SDRE/model timeout
+* ROS exception
+* CAN exception
+* manual stop
+* tracking error
+* workspace violation
+
+## 9.3 Input/output contract
+
+The bridge should accept an execution-space chunk:
+
+[
+a \in \mathbb R^{H \times 7}
+]
+
+with rows:
+
+[
+[q_1,q_2,q_3,q_4,q_5,q_6,g]
+]
+
+In your proposal, (H=4), commands are streamed at 10 Hz, and the gripper is clipped conservatively.
+
+The bridge should log exactly what it receives and exactly what it sends.
+
+For every decision context, log:
+
+```text
+run_id
+round_id
+episode_id
+context_id
+task_id
+language_instruction
+
+timestamp
+observed_joint_state
+observed_gripper_state
+camera_frame_paths
+camera_intrinsics_id
+camera_extrinsics_id
+
+candidate_chunks_Hx7
+safety_mask
+safety_rejection_reasons
+selected_candidate_index
+selector_scores
+propensities
+
+executed_chunk_Hx7
+execution_start_time
+execution_end_time
+robot_status_trace
+abort_flag
+label
+progress_score_optional
+```
+
+Your proposal already requires this style of minimal logging for reproducibility.
+
+---
+
+# 10. Implement the local safety shield first
+
+Do this before any policy inference.
+
+## 10.1 Pre-execution checks
+
+For each candidate chunk (a_{1:H}), check:
+
+1. joint limits,
+2. gripper limits,
+3. velocity limits,
+4. acceleration limits,
+5. workspace bounds using forward kinematics,
+6. table collision,
+7. self-collision,
+8. NaN / Inf values,
+9. command discontinuity from current observed state,
+10. stale robot state.
+
+The proposal’s current safety shield uses exactly this kind of deterministic hard filter and runtime abort monitor.
+
+## 10.2 Runtime checks
+
+During execution, monitor at a higher frequency than command streaming, for example 20 Hz:
+
+* observed-vs-commanded joint error
+* workspace violation
+* collision violation
+* heartbeat
+* CAN error
+* `/arm_status`
+* manual stop
+
+If anything fails:
+
+```text
+stop streaming
+send hold if safe
+call stop service if needed
+mark abort
+log reason
+disable robot if needed
+```
+
+## 10.3 Safety reason codes
+
+Use a fixed enum:
+
+```text
+joint_limit
+gripper_limit
+velocity
+acceleration
+workspace
+self_collision
+table_collision
+nan
+stale_state
+heartbeat
+tracking
+manual_estop
+ros_error
+can_error
+```
+
+This will be useful later for your paper, because reviewers will ask whether CAVER “works” only by rejecting many risky actions.
+
+---
+
+# 11. Camera setup and labeling
+
+## 11.1 Mount cameras
+
+Use three fixed cameras if following the proposal:
+
+```text
+head
+hand_left
+hand_right
+```
+
+They do not need to be on the robot wrist. In fact, for your first study, fixed external cameras are easier.
+
+Requirements:
+
+* fixed mounts
+* no accidental movement
+* synchronized or timestamped frames
+* consistent lighting
+* no camera auto-exposure surprises if possible
+* calibration saved to versioned YAML
+
+GE-Sim’s repo examples use multi-view images and describe camera names such as top/head and hand views in LeRobot-style datasets; its GE-Sim inference path loads images, extrinsics, intrinsics, and actions from `.npy` files. ([GitHub][6])
+
+## 11.2 Calibrate intrinsics
+
+For each camera:
+
+```text
+camera_matrix
+distortion_coefficients
+image_width
+image_height
+```
+
+Save:
+
+```text
+configs/camera/head_intrinsics.yaml
+configs/camera/hand_left_intrinsics.yaml
+configs/camera/hand_right_intrinsics.yaml
+```
+
+## 11.3 Calibrate extrinsics to robot base
+
+You need transforms like:
+
+[
+T_{\text{base}\leftarrow \text{camera}}
+]
+
+or
+
+[
+T_{\text{camera}\leftarrow \text{base}}
+]
+
+Pick one convention and write it explicitly in the YAML filename and metadata. Do not rely on arrow notation alone.
+
+Save:
+
+```text
+configs/camera/piper_multiview.yaml
+```
+
+## 11.4 Add object markers
+
+For the first real study, use AprilTags or ArUco markers.
+
+For each object:
+
+```text
+object_id
+tag_id
+tag_size_m
+tag_to_object_center_transform
+```
+
+Before training, collect 20 manually inspected episodes and compare automatic labels against human labels.
+
+---
+
+# 12. SDRE-native setup for this repository
+
+## 12.1 What to run on SDRE
+
+Run these on SDRE:
+
+* Stage-0 LIBERO simulation sweeps
+* GE-Sim inference tests
+* proxy-head training
+* calibrator fitting
+* StepNFT-style LoRA updates
+* ablations
+* plotting
+* checkpoint storage
+
+Do **not** run low-level robot control on SDRE. In this project, SDRE is the learning side; the local robot-control PC is the only machine allowed to command PiPER.
+
+## 12.2 Verified SDRE state for this repo on 2026-04-18
+
+Verified from the current cluster environment:
+
+```text
+Slurm account: p57098
+QoS available to the current user: interactive, normal
+Partitions: cpu, gpu-l40s, gpu-h200
+GPU type specifiers: gpu:l40s, gpu:h200
+GPU partition max walltime: 7-00:00:00
+Active code root: /projects/p57098/euijin1/Caver
+Large artifact root: /rdss/p57098/euijin1/caver
+Repo-local uv path: /projects/p57098/euijin1/Caver/tools/uv
+Current shell does not expose conda, docker, apptainer, or singularity
+SCRATCH may be set, but /scratch/euijin1 is missing in this session
+/tmp is large on this node, but it is not the durable storage target for runs
+```
+
+Current compute-node snapshot:
+
+* no nodes are drained or reporting active reasons
+* `gpu-h200` currently has both mixed and idle nodes
+* `gpu-l40s` currently has both mixed and idle nodes
+* `l40s-08` is real and idle, but it has only `3` L40S GPUs, not `4`
+* while busy, `l40s-01` and `l40s-03` were very low on free RAM, so avoid assuming spare colocated memory there
+* the active Stage-E follow-on wave is running cleanly on `h200-01`, `h200-02`, `h200-04`, `h200-05`, `l40s-01`, and `l40s-03`
+
+Public UAlberta pages describe SDRE as secure HPC infrastructure with Slurm and H200/L40S GPU nodes, but the project should still confirm internal SDRE policy for tunnels, services, and transfer rules with admins before attempting any live robot-service pattern. ([University of Alberta][2])
+
+## 12.3 Do not compute on the login node
+
+General cluster guidance still applies: log in for orchestration, but run real compute through interactive or batch jobs. Do not build the robot workflow around the login node. ([Mint Research Computing][3])
+
+## 12.4 SDRE layout that matches this repository
+
+On SDRE, keep code and small local state under `/projects`:
+
+```bash
+/projects/p57098/euijin1/Caver/
+  scripts/
+  metadata/
+  plans/
+  docs/
+  third_party/
+    src/
+    venvs/
+    openpi-cache/
+    model-cache/
+  logs/
+    runtime/
+```
+
+Keep large and durable artifacts under `/rdss`:
+
+```bash
+/rdss/p57098/euijin1/caver/
+  logs/
+    slurm/
+  runtime_logs/
+  runs/
+  artifacts/
+  stage1_piper/
+    raw/
+    processed/
+    manifests/
+    checkpoints/
+```
+
+On the robot-control PC:
+
+```bash
+~/caver_robot/
+  code/
+    Caver/
+    caver_robot_bridge/
+  configs/
+    camera/
+    piper/
+    piper_tasks.yaml
+  logs/
+    raw/
+    upload_queue/
+  checkpoints/
+    active/
+    previous/
+  emergency/
+    last_safe_home.json
+```
+
+## 12.5 Environment policy for this repo
+
+This repository already uses a module-plus-venv split. Do **not** rewrite the SDRE side around ad hoc `conda` environments unless you have a specific reason and record it.
+
+Supported repo-native bring-up:
+
+```bash
+scripts/env/bootstrap_openpi_env.sh
+scripts/env/bootstrap_libero_env.sh
+scripts/env/bootstrap_pistepnft_env.sh
+scripts/env/bootstrap_gesim_env.sh --profile sdre-infer
+```
+
+Supported wrapper shells:
+
+```bash
+scripts/env/with_openpi_libero_eval.sh -- bash -l
+scripts/env/with_libero_eval.sh -- bash -l
+scripts/env/with_openpi_pistepnft_libero_train.sh -- bash -l
+scripts/env/with_gesim_infer.sh -- bash -l
+```
+
+Current module facts useful for manual debugging:
+
+* `module avail cuda` shows `12.2`, `12.6`, and `12.9`
+* `module avail python` shows `3.10.13`, `3.11.5`, `3.12.4`, and newer on `StdEnv/2023`
+* plain `module avail cudnn` may show nothing, but `module spider cudnn` exposes versions including `9.10.0.56`
+
+## 12.6 OpenPI and GE-Sim on SDRE in the repo-native path
+
+If you are working inside this repo checkout, prefer the committed bootstrap and wrapper scripts over cloning separate sibling trees by hand.
+
+For OpenPI:
+
+* the repo already expects the OpenPI cache under `third_party/openpi-cache`
+* the supported checkpoint path for the current work is `third_party/openpi-cache/openpi-assets/checkpoints/pi05_libero_pytorch`
+* OpenPI’s upstream assumptions still matter: Ubuntu 22.04 support, `uv`, and the documented memory requirements (>8 GB inference, >22.5 GB LoRA, >70 GB full fine-tuning). ([GitHub][4])
+
+For GE-Sim:
+
+* use `scripts/env/bootstrap_gesim_env.sh --profile sdre-infer`
+* use `scripts/env/with_gesim_infer.sh` for runtime checks
+* use `python scripts/stagee/prepare_gesim_runtime.py --require-ready` to validate the asset layout
+
+## 12.7 GPU choice on SDRE
+
+Use the partitions intentionally:
+
+* `gpu-l40s`:
+  * smoke tests
+  * short interactive debugging
+  * lighter inference or post-train jobs
+* `gpu-h200`:
+  * memory-heavy GE-Sim work
+  * multi-GPU provider-aware CAVER jobs
+  * heavy held-out post-train runs
+
+For provider-aware CAVER, this repo currently prefers `2` GPUs so OpenPI and GE-Sim do not contend for one device.
+
+## 12.8 Slurm syntax that matches this cluster
+
+Always pass account, partition, and QoS explicitly.
+
+Interactive L40S example:
+
+```bash
+salloc \
+  --account=p57098 \
+  --partition=gpu-l40s \
+  --qos=interactive \
+  --gres=gpu:l40s:1 \
+  --cpus-per-task=8 \
+  --mem=64G \
+  --time=01:00:00
+```
+
+Interactive H200 example:
+
+```bash
+salloc \
+  --account=p57098 \
+  --partition=gpu-h200 \
+  --qos=interactive \
+  --gres=gpu:h200:1 \
+  --cpus-per-task=8 \
+  --mem=64G \
+  --time=01:00:00
+```
+
+Batch jobs should use the same explicit style:
+
+```bash
+#SBATCH --account=p57098
+#SBATCH --partition=gpu-h200
+#SBATCH --qos=normal
+#SBATCH --gres=gpu:h200:1
+```
+
+## 12.9 Containers on SDRE
+
+Treat Docker / Apptainer / Singularity as conditional, not assumed.
+
+At the time of this note, the current shell does **not** expose `docker`, `apptainer`, or `singularity`. If SDRE later provides an approved container path, record that separately and keep the repo-native module+venv route as the default documented path for this project.
+
+---
+
+# 13. How SDRE fits into Stage F for this repo
+
+## 13.1 Order of operations from Stage F.md
+
+The current Stage F plan is not “go straight from LIBERO to full PiPER.” The order is:
+
+1. `F0` readiness only:
+   * no-motion bring-up
+   * scripted motion
+   * safety-shield dry run
+   * shadow CAVER
+2. `F1` one-task pilot before the shared seed set is consumed
+3. only then collect the shared `120`-context seed set
+4. only then consider the full three-task Stage-1 study
+
+This ordering is part of proposal alignment, not just lab caution. It matches [Stage F.md](plans/Stage%20F.md).
+
+## 13.2 Recommended first SDRE workflow after F0 and the one-task pilot
+
+The safest real-learning workflow is still the round-based offline update.
+
+One round is:
+
+[
+B_{\text{round}} = 25
+]
+
+counted decision contexts in the proposal.
+
+Workflow:
+
+```text
+1. Local robot-control PC runs the current checkpoint.
+2. It collects 25 counted decision contexts.
+3. It logs candidates, propensities, selected actions, outcomes, images, and safety metadata.
+4. It uploads logs to SDRE.
+5. SDRE fits/refits the calibrator and runs the StepNFT-style update.
+6. SDRE writes a new checkpoint.
+7. The local robot-control PC downloads that checkpoint.
+8. The next round starts.
+```
+
+This is still the recommended first real-robot learning workflow.
+
+### Upload logs
+
+From the robot-control PC:
+
+```bash
+rsync -avh --partial \
+  ~/caver_robot/logs/upload_queue/ \
+  <user>@<sdre-login>:/rdss/p57098/euijin1/caver/stage1_piper/raw/
+```
+
+Use the SDRE-approved transfer method if policy requires something else.
+
+### Submit SDRE training jobs
+
+At the time of writing, this repo does **not** yet ship committed `scripts/stage1/...` entrypoints. So the Stage-1 Slurm job below is a cluster template, not a ready-to-run committed script.
+
+```bash
+#!/bin/bash
+#SBATCH --account=p57098
+#SBATCH --partition=gpu-h200
+#SBATCH --qos=normal
+#SBATCH --job-name=caver_round_update
+#SBATCH --time=04:00:00
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --gres=gpu:h200:1
+#SBATCH --output=/rdss/p57098/euijin1/caver/logs/slurm/%x_%j.out
+#SBATCH --error=/rdss/p57098/euijin1/caver/logs/slurm/%x_%j.err
+
+set -euo pipefail
+
+cd /projects/p57098/euijin1/Caver
+
+# Template only: replace the placeholder entrypoints below when Stage-1 scripts land.
+scripts/env/with_openpi_pistepnft_libero_train.sh -- \
+  python path/to/future_stage1_build_dr_dataset.py \
+    --input /rdss/p57098/euijin1/caver/stage1_piper/raw/<run_id> \
+    --output /rdss/p57098/euijin1/caver/stage1_piper/processed/<run_id>
+
+scripts/env/with_openpi_pistepnft_libero_train.sh -- \
+  python path/to/future_stage1_fit_calibrator.py \
+    --dataset /rdss/p57098/euijin1/caver/stage1_piper/processed/<run_id> \
+    --output /rdss/p57098/euijin1/caver/stage1_piper/checkpoints/caver/<run_id>/calibrator_round_${ROUND}
+
+scripts/env/with_openpi_pistepnft_libero_train.sh -- \
+  python path/to/future_stage1_posttrain_stepnft.py \
+    --dataset /rdss/p57098/euijin1/caver/stage1_piper/processed/<run_id> \
+    --init_checkpoint /rdss/p57098/euijin1/caver/stage1_piper/checkpoints/active_prev \
+    --output /rdss/p57098/euijin1/caver/stage1_piper/checkpoints/caver/<run_id>/round_${ROUND}
+```
+
+### Download checkpoint
+
+From the robot-control PC:
+
+```bash
+rsync -avh \
+  <user>@<sdre-login>:/rdss/p57098/euijin1/caver/stage1_piper/checkpoints/caver/<run_id>/round_${ROUND}/ \
+  ~/caver_robot/checkpoints/active/
+```
+
+Then update a symlink:
+
+```bash
+ln -sfn ~/caver_robot/checkpoints/active/round_${ROUND} ~/caver_robot/checkpoints/current
+```
+
+## 13.3 Optional later workflow: admin-approved remote inference only
+
+Use this only after the offline workflow is stable and only after SDRE admins explicitly confirm that the tunnel / service pattern is allowed.
+
+This repo does **not** currently ship a committed Stage-1 remote inference service module. Treat remote inference as a later design, not the default path.
+
+If it is ever enabled:
+
+* keep the allocation interactive
+* keep the local robot bridge authoritative
+* keep the final safety check local
+* make timeout imply hold or abort
+* never publish ROS or CAN commands from SDRE
+* do not make the robot depend on SDRE for the 10 Hz stream itself; the local executor should stream already-selected safe commands
+
+## 13.4 Mode B readiness checklist
+
+Treat this as a hard gate, not a suggestion list.
+
+Mode B is ready to trial only if all are true:
+
+* SDRE admins explicitly confirm that the compute-node tunnel / service pattern is allowed for this project
+* the service runs on an interactive GPU allocation, preferably `gpu-h200`
+* the local robot-control PC remains the only machine with ROS / CAN authority
+* the local bridge performs the final safety check and owns hold / abort on timeout
+* the local executor can keep streaming an already-selected safe chunk without waiting on SDRE
+* the repo-native wrappers and caches work on SDRE
+* GE-Sim runtime assets are present and pass `scripts/stagee/prepare_gesim_runtime.py --require-ready`
+* the websocket bridge passes at least dummy-mode end-to-end smoke
+* the real policy / exact-payload service path passes on a GPU node, not only on CPU
+* every request logs enough timing to separate policy sampling, provider work, selector/calibrator work, and network / serialization overhead
+* the local machine can fall back to a deterministic safe behavior if SDRE disappears mid-session
+
+Current repo-only facts before any PiPER hardware exists:
+
+* wrapper imports for `openpi`, `rlinf`, and `hydra` are already working on SDRE
+* GE-Sim assets are already present and reported ready on SDRE
+* dummy websocket bridge smoke already works on SDRE
+* CPU-only exact service smoke is **not** enough evidence for Mode B
+* the exact rollout-payload service was retested on `gpu-h200` and now passes end to end:
+  * `6105` confirmed the exact websocket service opens and returns `actions`, `forward_inputs`, `prev_logprobs`, `prev_values`, and `server_timing`
+  * `6109` completed the full SDRE-side rehearsal on `h200-01`, including client smoke, latency probe, and no-hardware shadow-mode dry run
+  * measured on-node latency for `6109`:
+    * client p50 about `174.8 ms`, p95 about `182.3 ms`
+    * server infer p50 about `173.2 ms`, p95 about `180.7 ms`
+* the exact-model shadow-mode dry run currently triggers local safety rejection for `velocity` and `acceleration`
+  * treat that as confirmation that the local bridge must remain safety-authoritative
+  * do not interpret it as a reason to let SDRE own actuation
+
+## 13.5 Shadow-mode latency test plan on SDRE
+
+Before any real Mode-B pilot, run one shadow-mode latency rehearsal with no robot motion.
+
+Suggested order:
+
+1. reserve one short interactive `gpu-h200` allocation
+2. start the policy / provider service on the compute node
+3. if policy allows it, open the approved tunnel path to the local machine
+4. first run a synthetic loopback probe on SDRE itself
+5. then run the same probe through the intended network path from the robot-control side
+6. only after that, try shadow mode on real observations with no learned execution
+
+Record at least:
+
+* request count
+* timeout count
+* client-observed end-to-end latency
+* server-side inference latency
+* action-shape / payload-shape sanity
+* hostname / partition / GPU type / job id
+
+For this repo, the simplest synthetic probe is:
+
+```bash
+scripts/env/with_openpi_libero_eval.sh -- \
+  python scripts/bridge/measure_policy_latency.py \
+    --host 127.0.0.1 \
+    --port 8765 \
+    --warmup 10 \
+    --requests 100
+```
+
+For SDRE-only LIBERO bridge rehearsals on the current H200 nodes, `osmesa` may be the safer headless backend if `egl` device initialization fails. Treat that as a runtime compatibility detail, not a method change.
+
+Provisional engineering gates for deciding whether Mode B is worth further work:
+
+* no timeouts in the probe run
+* dummy-mode websocket latency should be small relative to model time
+* the exact-payload or future provider-backed service should at least open reliably on `gpu-h200`
+* if end-to-end latency stays unstable or regularly exceeds about `2 s` per decision context, do **not** use Mode B for `F1`
+* if latency is stable and there are no timeout-induced safety holds, Mode B can remain a later option for provider scoring only
+
+These are engineering gates, not paper claims. The paper-level latency numbers should still be reported exactly as measured.
+
+Current SDRE-side status on `2026-04-18`:
+
+* the compute-side gate is now substantially satisfied
+* the remaining blockers are outside SDRE compute:
+  * admin approval for the tunnel / service pattern
+  * the local robot-control PC and local safety-authoritative bridge
+  * a real network-path latency test from the robot side
+  * hardware labeler / calibration / safety bring-up
+
+---
+
+# 14. CAVER-specific real-robot execution loop
+
+Once robot bring-up, cameras, safety shield, and data transfer work, the real CAVER loop is:
+
+## 14.1 At the start of an episode
+
+Operator resets:
+
+```text
+object placement
+camera visibility
+gripper state
+robot home pose
+workspace clear
+logs started
+```
+
+The bridge records:
+
+```text
+episode_id
+task_id
+language instruction
+template id
+camera frame ids
+current joint state
+```
+
+## 14.2 At a decision context
+
+The policy proposes (K=4) candidate chunks:
+
+[
+\tilde a^\pi_{r,c,k}, \quad k=1,\ldots,4.
+]
+
+The execution adapter converts each raw chunk to an executable PiPER chunk:
+
+[
+a_{r,c,k} = \Gamma_{\mathrm{exec}}(\tilde a^\pi_{r,c,k}, s^{\mathrm{prop}}_{r,c}).
+]
+
+In your current PiPER instantiation, this means an (H\times 7) chunk with (H=4):
+
+[
+a_{r,c,k}
+=========
+
+\begin{bmatrix}
+q_1 & q_2 & q_3 & q_4 & q_5 & q_6 & g
+\end{bmatrix}_{1:4}.
+]
+
+The safety shield computes:
+
+[
+K^{\mathrm{safe}}_{r,c}
+=======================
+
+{k: S_{\mathrm{safe}}(a_{r,c,k},s^{\mathrm{prop}}_{r,c})=1}.
+]
+
+If no candidate is safe:
+
+```text
+send hold
+log safety_abort
+count context
+end episode or continue according to protocol
+```
+
+If at least one candidate is safe, CAVER computes provider features, selector scores, and propensities:
+
+[
+p_{r,c,k} = \nu_r(k\mid c).
+]
+
+Then it samples:
+
+[
+A_{r,c}\sim \nu_r(\cdot\mid c).
+]
+
+The local robot-control PC revalidates (a_{r,c,A_{r,c}}), then streams it at 10 Hz.
+
+## 14.3 After execution
+
+The episode continues until:
+
+```text
+success
+4 decision contexts used
+timeout
+safety abort
+manual stop
+```
+
+The labeler produces:
+
+[
+Y_{r,c}\in{0,1}.
+]
+
+Then logs are stored for SDRE update.
+
+## 14.4 After one round
+
+After 25 counted contexts:
+
+1. upload logs to SDRE,
+2. form DR pseudo-outcomes,
+3. refit calibrator,
+4. update LoRA if enough positives exist,
+5. download checkpoint,
+6. start next round.
+
+This roundwise design is already in the proposal.
+
+---
+
+# 15. Step-by-step experiment staircase
+
+Do not jump directly to full CAVER.
+
+For this repo, the staircase must match the current Stage F gate:
+
+* `F0`: readiness only
+* `F1`: one-task pilot before the shared seed set is consumed
+* `F2`: full Stage-1 study only after the Stage-E follow-on pack is reviewed
+
+## Level 0 — simulation only
+
+Already mostly done.
+
+Goal:
+
+```text
+CAVER vs real-only in LIBERO
+logs complete
+baseline code works
+checkpoint update works
+```
+
+## Level 1 — real robot, no motion
+
+Run:
+
+```text
+ROS
+CAN
+camera capture
+state reader
+logging
+model server handshake
+```
+
+No robot motion.
+
+Pass condition:
+
+```text
+all logs are created
+timestamps make sense
+camera frames load
+joint states are stable
+no ROS errors
+```
+
+## Level 2 — scripted motion only
+
+Execute a tiny scripted safe motion.
+
+No OpenPI.
+No GE-Sim.
+No CAVER selector.
+
+Pass condition:
+
+```text
+motion is smooth
+stop works
+disable works
+logs match command
+observed state follows command
+```
+
+## Level 3 — safety-shield dry run
+
+Generate random fake chunks near the current state.
+
+Do not execute them.
+
+Pass condition:
+
+```text
+safe chunks accepted
+unsafe chunks rejected
+reason codes correct
+no NaNs
+workspace checks make sense
+```
+
+## Level 4 — shadow CAVER
+
+Run the full CAVER decision pipeline, but do not execute selected learned chunks.
+
+The robot stays still or executes only a scripted hold.
+
+Log:
+
+```text
+K candidates
+Ksafe
+scores
+propensities
+selected index
+GE-Sim outputs
+latency
+```
+
+Pass condition:
+
+```text
+no unsafe command reaches executor
+provider works
+selection distribution is valid
+propensities sum to 1 over safe candidates
+decision latency is acceptable
+```
+
+## Level 5 — human-approved learned chunks
+
+CAVER proposes and selects a chunk.
+
+Human confirms before execution.
+
+Use only:
+
+```text
+one task
+one seed
+very small N
+low-speed limits
+```
+
+Pass condition:
+
+```text
+no unsafe behavior
+labeler works
+logs complete
+```
+
+## Level 6 — one-task pilot before the shared seed set
+
+This is the current `F1` stage from [Stage F.md](plans/Stage%20F.md).
+
+Recommended ordering:
+
+```text
+block-to-tray first for control and safety bring-up
+can-to-bowl as the first method pilot if one learned-method pilot is run
+one seed
+N=25
+small validation only
+no significance claim
+```
+
+Do **not** consume the shared `120`-context seed set at this level.
+
+## Level 7 — shared seed-set collection
+
+Collect the shared `120`-context seed set only after Levels `1` through `6` pass:
+
+```text
+40 contexts block-to-tray
+40 contexts can-to-bowl
+40 contexts stack
+```
+
+Use the same safety shield, logging, and budget accounting across methods. The proposal treats this seed set as common warm-start data and reports it separately from matched training budget `N`.
+
+## Level 8 — full Stage 1
+
+Only then run:
+
+```text
+3 tasks
+N = 25, 50, 100, 200
+CAVER
+real-only
+WoVR if feasible
+ablation subset
+```
+
+Only start this level after:
+
+* the one-task pilot is stable
+* the current parallel Stage-E follow-on pack has produced:
+  * per-family diagnostics
+  * budget-curve evidence at `N in {25,50,100}`
+  * selection-only and admission-only ablations
+  * a clean no-DR plan
+
+---
+
+# 16. Practical SDRE job types for your project
+
+## Interactive job
+
+Use for debugging:
+
+```bash
+salloc \
+  --account=p57098 \
+  --partition=gpu-l40s \
+  --qos=interactive \
+  --gres=gpu:l40s:1 \
+  --cpus-per-task=8 \
+  --mem=64G \
+  --time=01:00:00
+```
+
+Then run small tests:
+
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
+scripts/env/with_openpi_pistepnft_libero_train.sh -- python -c "import openpi"
+scripts/env/with_gesim_infer.sh -- python scripts/stagee/prepare_gesim_runtime.py --require-ready
+```
+
+Interactive jobs are useful for testing, but general cluster guidance recommends using them sparingly and moving working scripts to batch jobs. ([Mint Research Computing][3])
+
+## Batch job
+
+Use for training:
+
+```bash
+sbatch --account=p57098 --partition=gpu-h200 --qos=normal train_round.sbatch
+```
+
+## Array jobs
+
+Use for Stage-0 ablations:
+
+```bash
+#SBATCH --account=p57098
+#SBATCH --partition=gpu-l40s
+#SBATCH --qos=normal
+#SBATCH --array=0-14
+```
+
+Map each array ID to:
+
+```text
+method
+task
+seed
+budget
+```
+
+## Checkpoints
+
+Save often. General cluster guidance recommends checkpointing long jobs so outages do not waste days of compute. ([Mint Research Computing][3])
+
+For CAVER, save:
+
+```text
+calibrator_round_r.json or .pt
+lora_round_r/
+selector_config.json
+manifest.lock
+metrics_round_r.json
+```
+
+Prefer saving durable artifacts under `/rdss/p57098/euijin1/caver/...`, not `/tmp`.
+
+---
+
+# 17. What to put in `manifest.lock`
+
+Before the first real robot run, create:
+
+```yaml
+study_id: caver_piper_stage1_v1
+date:
+operator:
+robot: piper
+firmware_version:
+urdf_file:
+urdf_sha256:
+
+software:
+  robot_control_repo_sha:
+  caver_repo_sha:
+  openpi_sha:
+  genie_envisioner_sha:
+  pi_stepnft_sha:
+  rlinf_sha:
+
+configs:
+  policy_config: pi05_piper_h4.py
+  policy_config_sha256:
+  camera_config: piper_multiview.yaml
+  camera_config_sha256:
+  piper_tasks: piper_tasks.yaml
+  piper_tasks_sha256:
+
+models:
+  base_checkpoint:
+  seed_checkpoint:
+  current_checkpoint:
+
+safety:
+  joint_limits_file:
+  workspace_file:
+  safety_config_sha256:
+
+random_seeds:
+  policy_sampling:
+  selector_sampling:
+  bootstrap_masks:
+  stepnft_sampling:
+  eval_template_shuffle:
+
+sdre:
+  project_path:
+  slurm_account:
+  gpu_type:
+  job_ids:
+```
+
+This is tedious, but it will save you later.
+
+---
+
+# 18. Data transfer rules
+
+Keep raw logs immutable.
+
+On robot-control PC:
+
+```text
+logs/raw/run_001/
+logs/raw/run_002/
+```
+
+Never edit those. Create processed copies:
+
+```text
+logs/processed/run_001/
+```
+
+Use checksums:
+
+```bash
+find logs/raw/run_001 -type f -print0 | sort -z | xargs -0 sha256sum > logs/raw/run_001/SHA256SUMS.txt
+```
+
+Upload:
+
+```bash
+rsync -avh --partial logs/raw/run_001/ \
+  <user>@<sdre-login>:/rdss/p57098/euijin1/caver/stage1_piper/raw/run_001/
+```
+
+Verify on SDRE:
+
+```bash
+cd /rdss/p57098/euijin1/caver/stage1_piper/raw/run_001
+sha256sum -c SHA256SUMS.txt
+```
+
+If SDRE has special approved transfer tools, use those instead.
+
+---
+
+# 19. What to do if you do not have a local GPU
+
+You have three choices.
+
+## Choice 1: Buy or borrow a local GPU workstation
+
+This is the best long-term choice. Even an RTX 4090-class machine is useful because OpenPI lists inference as needing more than 8 GB and LoRA as more than 22.5 GB; a local 24 GB+ GPU can often handle inference and some LoRA tasks. ([GitHub][4])
+
+## Choice 2: Use SDRE for remote inference
+
+Possible, but operationally harder.
+
+Requirements:
+
+```text
+approved SDRE tunnel/service policy
+interactive GPU allocation
+timeout handling
+local safety shield
+local execution authority
+local fallback hold command
+```
+
+This remains an optional later mode. For the current repo and Stage F gate, the default should still be SDRE between rounds, not inside the real-time robot loop.
+
+## Choice 3: Use SDRE only between rounds
+
+This is safest and enough for your first real study.
+
+During a round, use:
+
+```text
+local checkpoint
+local lightweight inference if possible
+or simpler baseline/seed collection
+```
+
+Between rounds:
+
+```text
+upload data
+train on SDRE
+download checkpoint
+```
+
+For CAVER specifically, if GE-Sim is too heavy to run live, you can start with:
+
+```text
+CAVER-lite shadow mode
+offline provider scoring
+selection-only diagnostics
+```
+
+Then move to live provider scoring after latency is understood.
+
+---
+
+# 20. Suggested first four weeks
+
+## Week 1: Robot and ROS bring-up
+
+Goals:
+
+```text
+CAN works
+ROS node starts
+topics visible
+enable/disable works
+no-motion logs work
+one tiny scripted motion works
+```
+
+Deliverables:
+
+```text
+bringup_notes.md
+can_setup.md
+robot_status_log.json
+first_motion_video.mp4
+```
+
+## Week 2: Camera and labeler
+
+Goals:
+
+```text
+three cameras mounted
+intrinsics calibrated
+extrinsics calibrated
+object tags detected
+automatic labeler tested
+```
+
+Deliverables:
+
+```text
+piper_multiview.yaml
+tag_config.yaml
+20 labeled validation episodes
+labeler_confusion_table.csv
+```
+
+## Week 3: Safety shield and bridge
+
+Goals:
+
+```text
+candidate Hx7 file accepted
+safety shield rejects bad chunks
+executor streams safe scripted chunks at 10 Hz
+runtime abort works
+```
+
+Deliverables:
+
+```text
+safety_config.yaml
+safety_reason_code_report.csv
+executor_unit_tests.md
+```
+
+## Week 4: Shadow CAVER
+
+Goals:
+
+```text
+OpenPI/GE-Sim/CAVER service runs
+robot sends observations
+service returns candidates/scores/propensities
+no learned chunks executed yet
+latency measured
+```
+
+Deliverables:
+
+```text
+shadow_run_001/
+latency_report.csv
+propensity_check.csv
+provider_schema_check.md
+```
+
+Then decide whether to collect seed data.
+
+---
+
+# 21. Go / no-go criteria before seed collection
+
+Do not collect the 120-context seed set until all are true:
+
+```text
+[ ] CAN activation is reliable after reboot.
+[ ] ROS topics/services are stable.
+[ ] Emergency stop / stop service tested.
+[ ] Reset procedure is written.
+[ ] Safety shield rejects invalid chunks.
+[ ] No process except bridge publishes motion commands.
+[ ] Cameras are calibrated.
+[ ] Labeler agrees with human labels on pilot episodes.
+[ ] Logs are complete and checksummed.
+[ ] SDRE upload/download works.
+[ ] SDRE training job runs end-to-end on one pilot log.
+[ ] Checkpoint download and reload works.
+[ ] Shadow CAVER propensities are valid.
+[ ] Latency is measured.
+[ ] One-task pilot completed without unsafe behavior.
+[ ] The current Stage-E follow-on pack has been reviewed.
+[ ] The SDRE workflow uses /projects and /rdss paths, not assumed /scratch paths.
+```
+
+---
+
+# 22. Common mistakes to avoid
+
+## Mistake 1: Trying to run everything on one machine
+
+OpenPI wants Ubuntu 22.04. PiPER ROS wants ROS Noetic on Ubuntu 20.04. Keep them separate. OpenPI’s repo says it is tested on Ubuntu 22.04, while PiPER’s public ROS stack is the `noetic` branch. ([GitHub][4])
+
+## Mistake 2: Directly publishing learned actions to `/joint_states`
+
+Always go through the bridge and safety shield.
+
+## Mistake 3: Using `auto_enable:=true` during debugging
+
+Start with `auto_enable:=false`. Enable manually.
+
+## Mistake 4: Forgetting gripper scaling
+
+The PiPER ROS README notes RViz joint7 range and actual gripper range can differ. Your proposal uses a conservative gripper command range, but you should empirically verify units/scaling on your actual gripper before data collection. ([GitHub][1])
+
+## Mistake 5: Letting SDRE become part of the safety loop
+
+SDRE may compute scores, but it should not be required for immediate safety. If network/model service fails, the local robot must hold or abort.
+
+## Mistake 6: No immutable raw logs
+
+Never overwrite raw logs. Every result should be traceable back to raw contexts.
+
+## Mistake 7: Starting with full CAVER
+
+Do scripted motion, then shadow mode, then the one-task pilot, then shared seed data.
+
+## Mistake 8: Assuming generic `/project/...` paths on SDRE
+
+This repo is currently pinned to `/projects/p57098/euijin1/Caver` for code and `/rdss/p57098/euijin1/caver` for large artifacts.
+
+## Mistake 9: Assuming `SCRATCH` is always usable
+
+The environment may set `SCRATCH`, but the actual path may be absent in a given session. Verify it before using it, and prefer `/projects` or `/rdss` for anything important.
+
+---
+
+# 23. Minimal real-robot pilot plan
+
+Start with one task: **block-to-tray**.
+
+## Pilot A: no-motion bring-up
+
+```text
+ROS up
+CAN up
+cameras up
+state/logging verified
+no robot motion
+```
+
+## Pilot B: scripted motion and safety
+
+```text
+tiny safe scripted motion
+stop and disable tested
+safety-reason logging checked
+```
+
+## Pilot C: CAVER shadow
+
+```text
+same observations
+CAVER scores candidates
+no learned execution
+latency and propensities only
+```
+
+## Pilot D: one-task Stage-F pilot before shared seed data
+
+```text
+one task
+one seed
+N=25
+full logs
+block-to-tray first for control bring-up
+can-to-bowl as the first method pilot if allowed
+no shared 120-context seed set yet
+```
+
+## Pilot E: shared seed set
+
+```text
+collect the common 120-context seed set only after Pilots A-D pass
+40 per Stage-1 task
+same logging and safety policy across methods
+```
+
+## Pilot F: full Stage 1
+
+Only after Pilot E should you scale to three tasks and the full budget curve.
+
+---
+
+# 24. My recommended decision about SDRE live connection
+
+For your first real-robot experiments:
+
+**Use SDRE asynchronously, not live.**
+
+That means:
+
+```text
+local robot collects data
+SDRE trains between rounds
+local robot uses downloaded checkpoints
+```
+
+This is much easier and safer.
+
+After that works, consider a live SDRE inference service only for provider scoring or policy inference, not for direct control.
+
+The key rule:
+
+> **The local robot-control machine must be able to stop safely even if SDRE disappears.**
+
+That is the boundary I would not cross.
+
+---
+
+# 25. Final checklist: what you should do next
+
+Your next concrete steps should be:
+
+1. Keep the verified SDRE facts recorded: account `p57098`, partitions `cpu`, `gpu-l40s`, `gpu-h200`, explicit QoS, `/projects` for code, and `/rdss` for large artifacts.
+2. Set up the local Ubuntu 20.04 + ROS Noetic robot-control machine.
+3. Install `piper_sdk` and `piper_ros`.
+4. Activate CAN and verify `/arm_status` and `/joint_states_single`.
+5. Test enable/disable, stop, and a tiny scripted motion.
+6. Build the local CAVER bridge with safety shield before any learned action.
+7. Mount and calibrate cameras.
+8. Validate marker-based labels.
+9. Use the repo-native SDRE wrappers and storage layout rather than generic `conda` or `/project/...` recipes.
+10. Run shadow-mode CAVER on real observations.
+11. Run the one-task Stage-F pilot before consuming the shared seed set.
+12. Collect the shared `120`-context seed set only after the pilot and readiness checks pass.
+13. Only then launch the full PiPER Stage-1 study.
+
+My strongest recommendation is to treat the robot stage as an **engineering staircase**, not a single jump from LIBERO to full CAVER. Your proposal already has the right conceptual split between Stage-0 LIBERO and Stage-1 PiPER; now the practical task is to make the local robot bridge safe, deterministic, and fully logged before SDRE-trained models are allowed to influence motion.
+
+[1]: https://github.com/agilexrobotics/piper_ros/blob/noetic/README%28EN%29.md "https://github.com/agilexrobotics/piper_ros/blob/noetic/README%28EN%29.md"
+[2]: https://www.ualberta.ca/en/information-services-and-technology/initiatives/sensitive-data-research-environment.html "https://www.ualberta.ca/en/information-services-and-technology/initiatives/sensitive-data-research-environment.html"
+[3]: https://mint.westdri.ca/ai/pt/pt_hpc "https://mint.westdri.ca/ai/pt/pt_hpc"
+[4]: https://github.com/Physical-Intelligence/openpi "https://github.com/Physical-Intelligence/openpi"
+[5]: https://github.com/agilexrobotics/piper_sdk "https://github.com/agilexrobotics/piper_sdk"
+[6]: https://github.com/AgibotTech/Genie-Envisioner "https://github.com/AgibotTech/Genie-Envisioner"
+[7]: https://docs.astral.sh/uv/getting-started/installation/ "https://docs.astral.sh/uv/getting-started/installation/"
+[8]: https://apptainer.org/docs/user/main/docker_and_oci.html "https://apptainer.org/docs/user/main/docker_and_oci.html"

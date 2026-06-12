@@ -1,0 +1,114 @@
+{
+  "aggregate": {
+    "admitted_demo_items_mean": 785,
+    "budget": 50,
+    "contexts_admitted_mean": 20.333333333333332,
+    "method": "fasr_progress_ranked",
+    "n_seeds": 3,
+    "primitive_steps_mean": 3110,
+    "seeds": [
+      7,
+      13,
+      29
+    ],
+    "segment_repair_trace_records_mean": 8,
+    "test_mean": 0.24,
+    "test_sem": 0.005773502691896255,
+    "validation_mean": 0.22,
+    "validation_sem": 0.005773502691896263
+  },
+  "artifact": "stagee_fasr_progress_ranked_budget50_summary_v1",
+  "comparisons": {
+    "hard_rescue_fulltrace_budget50": {
+      "admitted_demo_items_mean": 1414.3333333333333,
+      "primitive_steps_mean": 5630.666666666667,
+      "test_mean": 0.23666666666666666,
+      "validation_mean": 0.22
+    },
+    "previous_caver_budget50": {
+      "admitted_demo_items_mean": 338.0,
+      "primitive_steps_mean": 1338.3333333333333,
+      "test_mean": 0.22333333333333336,
+      "validation_mean": 0.20000000000000004
+    },
+    "real_only_k1_budget50": {
+      "admitted_demo_items_mean": 3816.3333333333335,
+      "primitive_steps_mean": 15237.666666666666,
+      "test_mean": 0.22666666666666666,
+      "validation_mean": 0.21999999999999997
+    },
+    "success_only_budget50": {
+      "admitted_demo_items_mean": 769.3333333333334,
+      "primitive_steps_mean": 3049.3333333333335,
+      "test_mean": 0.2333333333333333,
+      "validation_mean": 0.21333333333333335
+    }
+  },
+  "interpretation": [
+    "Corrected FASR improves held-out test success over previous conservative CAVER and vanilla real_only_k1 at N=50.",
+    "It keeps admitted backend data far below real_only_k1 but uses more data than the original overly conservative CAVER.",
+    "The gain comes from preserving verified successes plus adding two short verified-progress stack repair segments across seeds 7 and 13."
+  ],
+  "seeds": [
+    {
+      "admission_summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed7__budget50__20260607T132209Z/results/caver_admission_summary.json",
+      "admitted_demo_items": 825,
+      "contexts_admitted": 21,
+      "posttrain_summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed7_budget50_20260607T132209Z/posttrain_holdout_summary.json",
+      "primitive_steps_total": 3274,
+      "raw_family_record_counts": {
+        "block_to_tray_proxy": 469,
+        "container_insertion_proxy": 344,
+        "two_object_stack_proxy": 12
+      },
+      "seed": 7,
+      "segment_repair_family_counts": {
+        "two_object_stack_proxy": 1
+      },
+      "segment_repair_trace_records": 12,
+      "test_success_rate": 0.24,
+      "test_successes": 24,
+      "validation_success_rate": 0.23,
+      "validation_successes": 23
+    },
+    {
+      "admission_summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed13__budget50__20260607T132209Z/results/caver_admission_summary.json",
+      "admitted_demo_items": 807,
+      "contexts_admitted": 21,
+      "posttrain_summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed13_budget50_20260607T132209Z/posttrain_holdout_summary.json",
+      "primitive_steps_total": 3194,
+      "raw_family_record_counts": {
+        "block_to_tray_proxy": 472,
+        "container_insertion_proxy": 323,
+        "two_object_stack_proxy": 12
+      },
+      "seed": 13,
+      "segment_repair_family_counts": {
+        "two_object_stack_proxy": 1
+      },
+      "segment_repair_trace_records": 12,
+      "test_success_rate": 0.25,
+      "test_successes": 25,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admission_summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_runs_v1/stagee__caver-lagged-reprocess-progress-ranked__verified-progress-fasr-n50__seed29__budget50__20260607T132209Z/results/caver_admission_summary.json",
+      "admitted_demo_items": 723,
+      "contexts_admitted": 19,
+      "posttrain_summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed29_budget50_20260607T132209Z/posttrain_holdout_summary.json",
+      "primitive_steps_total": 2862,
+      "raw_family_record_counts": {
+        "block_to_tray_proxy": 407,
+        "container_insertion_proxy": 316
+      },
+      "seed": 29,
+      "segment_repair_family_counts": {},
+      "segment_repair_trace_records": 0,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    }
+  ]
+}

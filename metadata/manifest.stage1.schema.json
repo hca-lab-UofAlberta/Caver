@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CAVER Stage-1 Manifest Lock",
+  "type": "object",
+  "required": [
+    "status",
+    "ready_for_real_runs",
+    "study_id",
+    "software",
+    "configs",
+    "models",
+    "stage1_constants",
+    "safety",
+    "seed_real_set",
+    "random_seeds",
+    "sdre",
+    "notes"
+  ],
+  "properties": {
+    "status": {"type": "string"},
+    "ready_for_real_runs": {"type": "boolean"},
+    "study_id": {"type": "string"},
+    "software": {"type": "object"},
+    "configs": {"type": "object"},
+    "models": {"type": "object"},
+    "stage1_constants": {"type": "object"},
+    "safety": {"type": "object"},
+    "seed_real_set": {"type": "object"},
+    "random_seeds": {"type": "object"},
+    "sdre": {"type": "object"},
+    "notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import gzip
 import json
 import logging
 from dataclasses import dataclass, field
@@ -237,7 +238,7 @@ def _iter_jsonl_trace_records(
     trace_path: Path, max_records: int | None
 ) -> Iterator[dict[str, Any]]:
     produced = 0
-    with trace_path.open("r", encoding="utf-8") as handle:
+    with open_text_maybe_gzip(trace_path, "rt") as handle:
         for line_number, line in enumerate(handle, start=1):
             line = line.strip()
             if not line:
@@ -257,7 +258,7 @@ def _iter_jsonl_trace_records(
 
 def load_trace_source_manifest(trace_path: Path) -> dict[str, Any] | None:
     first_nonempty: str | None = None
-    with trace_path.open("r", encoding="utf-8") as handle:
+    with open_text_maybe_gzip(trace_path, "rt") as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line:
@@ -281,7 +282,7 @@ def iter_trace_records_from_source(
     completed_prefix_contexts: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     contexts_seen: set[str] = set()
-    with trace_path.open("r", encoding="utf-8") as handle:
+    with open_text_maybe_gzip(trace_path, "rt") as handle:
         for line_number, line in enumerate(handle, start=1):
             line = line.strip()
             if not line:
@@ -324,6 +325,12 @@ def iter_trace_records(
                 return
     if produced == 0:
         raise ValueError(f"trace manifest produced zero records: {trace_path}")
+
+
+def open_text_maybe_gzip(path: Path, mode: str):
+    if path.suffix == ".gz":
+        return gzip.open(path, mode, encoding="utf-8")
+    return path.open(mode, encoding="utf-8")
 
 
 def tokenize_prompt(
@@ -404,7 +411,7 @@ def pad_actions(actions: np.ndarray, *, horizon: int) -> np.ndarray:
     return padded
 
 
-def validate_chunk_record(record: dict[str, Any]) -> None:
+def validate_chunk_record(record: dict[str, Any], *, require_full_next_obs_sequence: bool) -> None:
     steps_executed = len(record["actions"])
     expected_lengths = {
         "rewards": len(record["rewards"]),
@@ -412,8 +419,15 @@ def validate_chunk_record(record: dict[str, Any]) -> None:
         "terminations": len(record["terminations"]),
         "truncations": len(record["truncations"]),
         "success_once": len(record["success_once"]),
-        "next_obs_sequence": len(record["next_obs_sequence"]),
     }
+    next_obs_len = len(record["next_obs_sequence"])
+    if require_full_next_obs_sequence:
+        expected_lengths["next_obs_sequence"] = next_obs_len
+    elif next_obs_len < 1:
+        raise ValueError(
+            f"trace record {record['context_id']} policy_query_index={record['policy_query_index']} "
+            "has empty next_obs_sequence"
+        )
     bad_lengths = {key: value for key, value in expected_lengths.items() if value != steps_executed}
     if bad_lengths:
         raise ValueError(
@@ -429,7 +443,7 @@ def build_chunk_demo_item(
     discrete_state_input: bool,
     token_cache: dict[str, tuple[np.ndarray, np.ndarray]],
 ) -> dict[str, Any]:
-    validate_chunk_record(record)
+    validate_chunk_record(record, require_full_next_obs_sequence=False)
     prompt = str(record["prompt"])
     horizon = int(record["chunk_action_horizon"])
     actions = pad_actions(np.asarray(record["actions"], dtype=np.float32), horizon=horizon)
@@ -497,7 +511,7 @@ def build_primitive_demo_items(
     discrete_state_input: bool,
     token_cache: dict[str, tuple[np.ndarray, np.ndarray]],
 ) -> list[dict[str, Any]]:
-    validate_chunk_record(record)
+    validate_chunk_record(record, require_full_next_obs_sequence=True)
     prompt = str(record["prompt"])
     actions = np.asarray(record["actions"], dtype=np.float32)
     rewards = np.asarray(record["rewards"], dtype=np.float32)

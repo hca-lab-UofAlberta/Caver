@@ -67,10 +67,11 @@ def _mlp_predict_stagee_dr_calibrator(model: dict[str, Any], standardized_featur
     floor = float(scale_bounds.get("floor", 0.02))
     ceiling = float(scale_bounds.get("ceiling", 0.5))
     corrected_scale = bounded_sigmoid(raw_scale, lower=floor, upper=ceiling)
-    corrected_mean = clamp_unit_interval(raw_mean)
+    corrected_mean = raw_mean
     return {
         "raw_mean": raw_mean,
         "mean": corrected_mean,
+        "clipped_mean": clamp_unit_interval(raw_mean),
         "scale": corrected_scale,
         "raw_scale": raw_scale,
     }

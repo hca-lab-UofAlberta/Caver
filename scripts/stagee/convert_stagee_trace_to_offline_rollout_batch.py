@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import gzip
 import json
 import logging
 from dataclasses import dataclass, field
@@ -113,6 +114,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Preserve prev_logprobs when every converted chunk provides them.",
     )
+    parser.add_argument(
+        "--no-validate-save",
+        action="store_true",
+        help=(
+            "Skip reloading the saved .pt artifact. By default the converter validates "
+            "the file immediately after torch.save so filesystem write failures are "
+            "caught before GPU post-training starts."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -154,9 +164,33 @@ def json_default(value: Any) -> Any:
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
+def validate_saved_rollout_batch(output_path: Path, expected_keys: set[str]) -> None:
+    try:
+        loaded = torch.load(output_path, map_location="cpu", weights_only=False)
+    except Exception as exc:
+        raise RuntimeError(
+            f"saved rollout batch could not be reloaded: {output_path}. "
+            "Large torch.save artifacts may be invalid on this filesystem; "
+            "use project storage for --output-path instead of RDSS."
+        ) from exc
+
+    if not isinstance(loaded, dict):
+        raise RuntimeError(
+            f"saved rollout batch reloaded as {type(loaded).__name__}, expected dict: "
+            f"{output_path}"
+        )
+
+    missing_keys = sorted(expected_keys - set(loaded))
+    if missing_keys:
+        raise RuntimeError(
+            f"saved rollout batch is missing keys after reload: {missing_keys}; "
+            f"path={output_path}"
+        )
+
+
 def load_trace_source_manifest(trace_path: Path) -> dict[str, Any] | None:
     first_nonempty: str | None = None
-    with trace_path.open("r", encoding="utf-8") as handle:
+    with open_text_maybe_gzip(trace_path, "rt") as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line:
@@ -180,7 +214,7 @@ def iter_trace_records_from_source(
     completed_prefix_contexts: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     contexts_seen: set[str] = set()
-    with trace_path.open("r", encoding="utf-8") as handle:
+    with open_text_maybe_gzip(trace_path, "rt") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.strip()
             if not line:
@@ -227,7 +261,7 @@ def _iter_jsonl_trace_records(
     max_records: int | None,
 ) -> Iterator[dict[str, Any]]:
     produced = 0
-    with trace_path.open("r", encoding="utf-8") as handle:
+    with open_text_maybe_gzip(trace_path, "rt") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.strip()
             if not line:
@@ -243,6 +277,12 @@ def _iter_jsonl_trace_records(
                 return
     if produced == 0:
         raise ValueError(f"trace path produced zero records: {trace_path}")
+
+
+def open_text_maybe_gzip(path: Path, mode: str):
+    if path.suffix == ".gz":
+        return gzip.open(path, mode, encoding="utf-8")
+    return path.open(mode, encoding="utf-8")
 
 
 def tokenize_prompt(
@@ -746,11 +786,16 @@ def main() -> None:
 
     torch.save(payload, output_path)
     logging.info("wrote offline rollout batch to %s", output_path)
+    output_load_validated = not bool(args.no_validate_save)
+    if output_load_validated:
+        validate_saved_rollout_batch(output_path, set(payload))
+        logging.info("validated offline rollout batch reload from %s", output_path)
 
     summary = {
         "trace_path": str(trace_path),
         "output_path": str(output_path),
         "summary_path": str(summary_path) if summary_path is not None else None,
+        "output_load_validated": output_load_validated,
         "openpi_config_name": args.openpi_config_name,
         "max_token_len": max_token_len,
         "discrete_state_input": discrete_state_input,

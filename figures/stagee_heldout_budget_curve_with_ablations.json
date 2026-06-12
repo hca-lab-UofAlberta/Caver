@@ -1,0 +1,1261 @@
+{
+  "aggregate": [
+    {
+      "admitted_demo_items_mean": 167.33333333333334,
+      "budget": 25,
+      "method": "caver",
+      "n_seeds": 3,
+      "primitive_steps_mean": 659.6666666666666,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.21999999999999997,
+      "test_sem": 0.008164965809277261,
+      "validation_mean": 0.21666666666666667,
+      "validation_sem": 0.005443310539518178
+    },
+    {
+      "admitted_demo_items_mean": 338.0,
+      "budget": 50,
+      "method": "caver",
+      "n_seeds": 3,
+      "primitive_steps_mean": 1338.3333333333333,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22333333333333336,
+      "test_sem": 0.002721655269759089,
+      "validation_mean": 0.20000000000000004,
+      "validation_sem": 0.004714045207910315
+    },
+    {
+      "admitted_demo_items_mean": 849.3333333333334,
+      "budget": 100,
+      "method": "caver",
+      "n_seeds": 3,
+      "primitive_steps_mean": 3353.3333333333335,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22666666666666666,
+      "test_sem": 0.005443310539518171,
+      "validation_mean": 0.19000000000000003,
+      "validation_sem": 0.0
+    },
+    {
+      "admitted_demo_items_mean": 1894.6666666666667,
+      "budget": 25,
+      "method": "real_only",
+      "n_seeds": 3,
+      "primitive_steps_mean": 7563.0,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22999999999999998,
+      "test_sem": 0.012472191289246475,
+      "validation_mean": 0.21333333333333335,
+      "validation_sem": 0.005443310539518171
+    },
+    {
+      "admitted_demo_items_mean": 3807.0,
+      "budget": 50,
+      "method": "real_only",
+      "n_seeds": 3,
+      "primitive_steps_mean": 15194.0,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.21333333333333335,
+      "test_sem": 0.002721655269759089,
+      "validation_mean": 0.20333333333333334,
+      "validation_sem": 0.007200822998230955
+    },
+    {
+      "admitted_demo_items_mean": 7659.333333333333,
+      "budget": 100,
+      "method": "real_only",
+      "n_seeds": 3,
+      "primitive_steps_mean": 30573.666666666668,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.2333333333333333,
+      "test_sem": 0.0027216552697590817,
+      "validation_mean": 0.21666666666666667,
+      "validation_sem": 0.011863420280034788
+    },
+    {
+      "admitted_demo_items_mean": 1884.6666666666667,
+      "budget": 25,
+      "method": "real_only_k1",
+      "n_seeds": 3,
+      "primitive_steps_mean": 7521.333333333333,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22666666666666668,
+      "test_sem": 0.002721655269759089,
+      "validation_mean": 0.21333333333333335,
+      "validation_sem": 0.007200822998230957
+    },
+    {
+      "admitted_demo_items_mean": 3816.3333333333335,
+      "budget": 50,
+      "method": "real_only_k1",
+      "n_seeds": 3,
+      "primitive_steps_mean": 15237.666666666666,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22666666666666666,
+      "test_sem": 0.005443310539518171,
+      "validation_mean": 0.21999999999999997,
+      "validation_sem": 0.008164965809277261
+    },
+    {
+      "admitted_demo_items_mean": 7628.666666666667,
+      "budget": 100,
+      "method": "real_only_k1",
+      "n_seeds": 3,
+      "primitive_steps_mean": 30445.0,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22666666666666668,
+      "test_sem": 0.002721655269759089,
+      "validation_mean": 0.20333333333333337,
+      "validation_sem": 0.007200822998230955
+    },
+    {
+      "admitted_demo_items_mean": 3792.6666666666665,
+      "budget": 50,
+      "method": "selection_only",
+      "n_seeds": 3,
+      "primitive_steps_mean": 15138.666666666666,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.22333333333333336,
+      "test_sem": 0.002721655269759089,
+      "validation_mean": 0.22999999999999998,
+      "validation_sem": 0.008164965809277261
+    },
+    {
+      "admitted_demo_items_mean": null,
+      "budget": 50,
+      "method": "admission_only",
+      "n_seeds": 3,
+      "primitive_steps_mean": null,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.21333333333333335,
+      "test_sem": 0.005443310539518171,
+      "validation_mean": 0.20666666666666667,
+      "validation_sem": 0.007200822998230955
+    },
+    {
+      "admitted_demo_items_mean": 785.0,
+      "budget": 50,
+      "method": "fasr_progress_ranked",
+      "n_seeds": 3,
+      "primitive_steps_mean": 3110.0,
+      "seeds": [
+        7,
+        13,
+        29
+      ],
+      "test_mean": 0.24,
+      "test_sem": 0.004714045207910315,
+      "validation_mean": 0.22,
+      "validation_sem": 0.004714045207910322
+    }
+  ],
+  "methods": {
+    "admission_only": "Admission-only",
+    "caver": "CAVER",
+    "fasr_progress_ranked": "Progress-ranked FASR",
+    "hard_rescue_fulltrace": "Hard-family rescue CAVER",
+    "k1_guarded_success_only": "K=1-guarded CAVER + success-only",
+    "no_dr": "No-DR CAVER",
+    "no_provider": "No-provider CAVER",
+    "real_only": "Real-only K=4 uniform",
+    "real_only_k1": "Vanilla real-only K=1",
+    "selection_only": "Selection-only",
+    "success_only": "Success-only admission",
+    "top_m_success": "Top-M15 success admission"
+  },
+  "missing_cells": [
+    {
+      "budget": 25,
+      "method": "selection_only",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "selection_only",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "selection_only",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "selection_only",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "selection_only",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "selection_only",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "admission_only",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "admission_only",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "admission_only",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "admission_only",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "admission_only",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "admission_only",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "success_only",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "success_only",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "success_only",
+      "seed": 29
+    },
+    {
+      "budget": 50,
+      "method": "success_only",
+      "seed": 7
+    },
+    {
+      "budget": 50,
+      "method": "success_only",
+      "seed": 13
+    },
+    {
+      "budget": 50,
+      "method": "success_only",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "success_only",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "success_only",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "success_only",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "k1_guarded_success_only",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "k1_guarded_success_only",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "k1_guarded_success_only",
+      "seed": 29
+    },
+    {
+      "budget": 50,
+      "method": "k1_guarded_success_only",
+      "seed": 7
+    },
+    {
+      "budget": 50,
+      "method": "k1_guarded_success_only",
+      "seed": 13
+    },
+    {
+      "budget": 50,
+      "method": "k1_guarded_success_only",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "k1_guarded_success_only",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "k1_guarded_success_only",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "k1_guarded_success_only",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "top_m_success",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "top_m_success",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "top_m_success",
+      "seed": 29
+    },
+    {
+      "budget": 50,
+      "method": "top_m_success",
+      "seed": 7
+    },
+    {
+      "budget": 50,
+      "method": "top_m_success",
+      "seed": 13
+    },
+    {
+      "budget": 50,
+      "method": "top_m_success",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "top_m_success",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "top_m_success",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "top_m_success",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "hard_rescue_fulltrace",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "hard_rescue_fulltrace",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "hard_rescue_fulltrace",
+      "seed": 29
+    },
+    {
+      "budget": 50,
+      "method": "hard_rescue_fulltrace",
+      "seed": 7
+    },
+    {
+      "budget": 50,
+      "method": "hard_rescue_fulltrace",
+      "seed": 13
+    },
+    {
+      "budget": 50,
+      "method": "hard_rescue_fulltrace",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "hard_rescue_fulltrace",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "hard_rescue_fulltrace",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "hard_rescue_fulltrace",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "fasr_progress_ranked",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "fasr_progress_ranked",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "fasr_progress_ranked",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "fasr_progress_ranked",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "fasr_progress_ranked",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "fasr_progress_ranked",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "no_dr",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "no_dr",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "no_dr",
+      "seed": 29
+    },
+    {
+      "budget": 50,
+      "method": "no_dr",
+      "seed": 7
+    },
+    {
+      "budget": 50,
+      "method": "no_dr",
+      "seed": 13
+    },
+    {
+      "budget": 50,
+      "method": "no_dr",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "no_dr",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "no_dr",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "no_dr",
+      "seed": 29
+    },
+    {
+      "budget": 25,
+      "method": "no_provider",
+      "seed": 7
+    },
+    {
+      "budget": 25,
+      "method": "no_provider",
+      "seed": 13
+    },
+    {
+      "budget": 25,
+      "method": "no_provider",
+      "seed": 29
+    },
+    {
+      "budget": 50,
+      "method": "no_provider",
+      "seed": 7
+    },
+    {
+      "budget": 50,
+      "method": "no_provider",
+      "seed": 13
+    },
+    {
+      "budget": 50,
+      "method": "no_provider",
+      "seed": 29
+    },
+    {
+      "budget": 100,
+      "method": "no_provider",
+      "seed": 7
+    },
+    {
+      "budget": 100,
+      "method": "no_provider",
+      "seed": 13
+    },
+    {
+      "budget": 100,
+      "method": "no_provider",
+      "seed": 29
+    }
+  ],
+  "note": "This is the held-out checkpoint curve needed for sample-efficiency claims. It is distinct from the within-run online trajectory diagnostic.",
+  "rows": [
+    {
+      "admitted_demo_items": 164,
+      "budget": 25,
+      "contexts_covered": 5,
+      "method": "caver",
+      "online_success_rate": null,
+      "online_successes": null,
+      "primitive_steps_total": 645,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget25__20260508T182807Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget25__20260508T182807Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.21,
+      "test_successes": 21,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 172,
+      "budget": 25,
+      "contexts_covered": 5,
+      "method": "caver",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 678,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget25__20260508T182807Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget25__20260508T182807Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.21,
+      "test_successes": 21,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 166,
+      "budget": 25,
+      "contexts_covered": 5,
+      "method": "caver",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 656,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget25__20260508T182807Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget25__20260508T182807Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.24,
+      "test_successes": 24,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.23,
+      "validation_successes": 23
+    },
+    {
+      "admitted_demo_items": 335,
+      "budget": 50,
+      "contexts_covered": 10,
+      "method": "caver",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 1334,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260416T222546Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget50__20260416T222546Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 333,
+      "budget": 50,
+      "contexts_covered": 10,
+      "method": "caver",
+      "online_success_rate": 0.38,
+      "online_successes": 19,
+      "primitive_steps_total": 1319,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget50__20260416T222546Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget50__20260416T222546Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": 346,
+      "budget": 50,
+      "contexts_covered": 10,
+      "method": "caver",
+      "online_success_rate": 0.38,
+      "online_successes": 19,
+      "primitive_steps_total": 1362,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T222547Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget50__20260416T222547Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.2,
+      "validation_successes": 20
+    },
+    {
+      "admitted_demo_items": 688,
+      "budget": 100,
+      "contexts_covered": 20,
+      "method": "caver",
+      "online_success_rate": 0.4,
+      "online_successes": 40,
+      "primitive_steps_total": 2716,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget100__20260508T182808Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed7__budget100__20260508T182808Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": 666,
+      "budget": 100,
+      "contexts_covered": 20,
+      "method": "caver",
+      "online_success_rate": 0.4,
+      "online_successes": 40,
+      "primitive_steps_total": 2628,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget100__20260508T182808Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed13__budget100__20260508T182808Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": 1194,
+      "budget": 100,
+      "contexts_covered": 33,
+      "method": "caver",
+      "online_success_rate": 0.39,
+      "online_successes": 39,
+      "primitive_steps_total": 4716,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget100__20260508T182809Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all__seed29__budget100__20260508T182809Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.24,
+      "test_successes": 24,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": 1923,
+      "budget": 25,
+      "contexts_covered": 25,
+      "method": "real_only",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 7674,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260418T075946Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget25__20260418T075946Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.26,
+      "test_successes": 26,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.2,
+      "validation_successes": 20
+    },
+    {
+      "admitted_demo_items": 1865,
+      "budget": 25,
+      "contexts_covered": 25,
+      "method": "real_only",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 7448,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget25__20260418T075947Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget25__20260418T075947Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.21,
+      "test_successes": 21,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admitted_demo_items": 1896,
+      "budget": 25,
+      "contexts_covered": 25,
+      "method": "real_only",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 7567,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget25__20260418T075948Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget25__20260418T075948Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admitted_demo_items": 3831,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "real_only",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 15286,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget50__20260416T222544Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget50__20260416T222544Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.2,
+      "validation_successes": 20
+    },
+    {
+      "admitted_demo_items": 3747,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "real_only",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 14952,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget50__20260416T222545Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget50__20260416T222545Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.21,
+      "test_successes": 21,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": 3843,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "real_only",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 15344,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget50__20260416T222545Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget50__20260416T222545Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.21,
+      "test_successes": 21,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admitted_demo_items": 7626,
+      "budget": 100,
+      "contexts_covered": 100,
+      "method": "real_only",
+      "online_success_rate": 0.4,
+      "online_successes": 40,
+      "primitive_steps_total": 30440,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget100__20260418T075949Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed7__budget100__20260418T075949Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": 7698,
+      "budget": 100,
+      "contexts_covered": 100,
+      "method": "real_only",
+      "online_success_rate": 0.39,
+      "online_successes": 39,
+      "primitive_steps_total": 30729,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget100__20260418T075950Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed13__budget100__20260418T075950Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admitted_demo_items": 7654,
+      "budget": 100,
+      "contexts_covered": 100,
+      "method": "real_only",
+      "online_success_rate": 0.39,
+      "online_successes": 39,
+      "primitive_steps_total": 30552,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget100__20260418T075951Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all__seed29__budget100__20260418T075951Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.24,
+      "test_successes": 24,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.24,
+      "validation_successes": 24
+    },
+    {
+      "admitted_demo_items": 1905,
+      "budget": 25,
+      "contexts_covered": 25,
+      "method": "real_only_k1",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 7605,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed7__budget25__20260513T005900Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed7__budget25__20260513T005900Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.2,
+      "validation_successes": 20
+    },
+    {
+      "admitted_demo_items": 1863,
+      "budget": 25,
+      "contexts_covered": 25,
+      "method": "real_only_k1",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 7438,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed13__budget25__20260513T005900Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed13__budget25__20260513T005900Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 1886,
+      "budget": 25,
+      "contexts_covered": 25,
+      "method": "real_only_k1",
+      "online_success_rate": 0.4,
+      "online_successes": 10,
+      "primitive_steps_total": 7521,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed29__budget25__20260513T005901Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed29__budget25__20260513T005901Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 25,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.23,
+      "validation_successes": 23
+    },
+    {
+      "admitted_demo_items": 3770,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "real_only_k1",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 15048,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed7__budget50__20260514T210714Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed7__budget50__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.24,
+      "validation_successes": 24
+    },
+    {
+      "admitted_demo_items": 3817,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "real_only_k1",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 15245,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed13__budget50__20260514T210714Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed13__budget50__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.24,
+      "test_successes": 24,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 3862,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "real_only_k1",
+      "online_success_rate": 0.38,
+      "online_successes": 19,
+      "primitive_steps_total": 15420,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed29__budget50__20260514T210714Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed29__budget50__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": 7599,
+      "budget": 100,
+      "contexts_covered": 100,
+      "method": "real_only_k1",
+      "online_success_rate": 0.39,
+      "online_successes": 39,
+      "primitive_steps_total": 30324,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed7__budget100__20260514T210714Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed7__budget100__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admitted_demo_items": 7610,
+      "budget": 100,
+      "contexts_covered": 100,
+      "method": "real_only_k1",
+      "online_success_rate": 0.39,
+      "online_successes": 39,
+      "primitive_steps_total": 30370,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed13__budget100__20260514T210715Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed13__budget100__20260514T210715Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": 7677,
+      "budget": 100,
+      "contexts_covered": 100,
+      "method": "real_only_k1",
+      "online_success_rate": 0.4,
+      "online_successes": 40,
+      "primitive_steps_total": 30641,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed29__budget100__20260514T210715Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__real-only-round__manifest-t_train_s0-all-vanilla-k1__seed29__budget100__20260514T210715Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 100,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.2,
+      "validation_successes": 20
+    },
+    {
+      "admitted_demo_items": 3748,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "selection_only",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 14959,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-selection-only__seed7__budget50__20260514T210714Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-selection-only__seed7__budget50__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.24,
+      "validation_successes": 24
+    },
+    {
+      "admitted_demo_items": 3771,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "selection_only",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 15055,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-selection-only__seed13__budget50__20260514T210714Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-selection-only__seed13__budget50__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.24,
+      "validation_successes": 24
+    },
+    {
+      "admitted_demo_items": 3859,
+      "budget": 50,
+      "contexts_covered": 50,
+      "method": "selection_only",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 15402,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-selection-only__seed29__budget50__20260514T210714Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-selection-only__seed29__budget50__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": null,
+      "budget": 50,
+      "contexts_covered": null,
+      "method": "admission_only",
+      "online_success_rate": 0.38,
+      "online_successes": 19,
+      "primitive_steps_total": null,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-admission-only__seed7__budget50__20260514T210714Z",
+      "seed": 7,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-admission-only__seed7__budget50__20260514T210714Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.2,
+      "test_successes": 20,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.19,
+      "validation_successes": 19
+    },
+    {
+      "admitted_demo_items": null,
+      "budget": 50,
+      "contexts_covered": null,
+      "method": "admission_only",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": null,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-admission-only__seed13__budget50__20260514T210715Z",
+      "seed": 13,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-admission-only__seed13__budget50__20260514T210715Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    },
+    {
+      "admitted_demo_items": null,
+      "budget": 50,
+      "contexts_covered": null,
+      "method": "admission_only",
+      "online_success_rate": 0.42,
+      "online_successes": 21,
+      "primitive_steps_total": null,
+      "run_dir": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-admission-only__seed29__budget50__20260514T210715Z",
+      "seed": 29,
+      "summary_path": "/rdss/p57098/euijin1/caver/stagee_posttrain/stagee__caver-lagged__manifest-t_train_s0-all-admission-only__seed29__budget50__20260514T210715Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.22,
+      "test_successes": 22,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admitted_demo_items": 825,
+      "budget": 50,
+      "contexts_covered": 21,
+      "method": "fasr_progress_ranked",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 3274,
+      "run_dir": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed7_budget50_20260607T132209Z",
+      "seed": 7,
+      "summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed7_budget50_20260607T132209Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.24,
+      "test_successes": 24,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.23,
+      "validation_successes": 23
+    },
+    {
+      "admitted_demo_items": 807,
+      "budget": 50,
+      "contexts_covered": 21,
+      "method": "fasr_progress_ranked",
+      "online_success_rate": 0.4,
+      "online_successes": 20,
+      "primitive_steps_total": 3194,
+      "run_dir": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed13_budget50_20260607T132209Z",
+      "seed": 13,
+      "summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed13_budget50_20260607T132209Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.25,
+      "test_successes": 25,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.22,
+      "validation_successes": 22
+    },
+    {
+      "admitted_demo_items": 723,
+      "budget": 50,
+      "contexts_covered": 19,
+      "method": "fasr_progress_ranked",
+      "online_success_rate": 0.38,
+      "online_successes": 19,
+      "primitive_steps_total": 2862,
+      "run_dir": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed29_budget50_20260607T132209Z",
+      "seed": 29,
+      "summary_path": "/projects/p57098/euijin1/caver_stagee_fasr_verified_progress_posttrain_v1/seed29_budget50_20260607T132209Z/posttrain_holdout_summary.json",
+      "test_episodes": 100,
+      "test_success_rate": 0.23,
+      "test_successes": 23,
+      "trusted_contexts": 50,
+      "validation_episodes": 100,
+      "validation_success_rate": 0.21,
+      "validation_successes": 21
+    }
+  ],
+  "workflow": "stagee_heldout_budget_curve_v1",
+  "x_axis": "trusted execution contexts N"
+}

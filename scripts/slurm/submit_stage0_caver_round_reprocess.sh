@@ -19,7 +19,7 @@ Slurm options:
   --partition NAME
   --qos NAME
   --gpu-type TYPE
-  --gpus COUNT
+  --gpus COUNT              Use 0 to omit --gres and run as CPU-only reprocessing.
   --time LIMIT
   --cpus COUNT
   --mem SIZE
@@ -29,6 +29,24 @@ Slurm options:
 Reprocess options:
   --skip-backend-train
       Rebuild selector/admission/DR artifacts only; do not run replay conversion or backend training.
+  --admission-policy NAME
+      Override the source admission policy for the reprocessed final artifacts.
+  --admission-kappa VALUE
+      Optional kappa override for LCB-style admission policies.
+  --admission-threshold VALUE
+      Optional acceptance-threshold override for LCB-style admission policies.
+  --top-m-success-count COUNT
+      For caver_top_m_success, admit top M successful contexts by executed LCB.
+  --family-min-success-count COUNT
+      For caver_family_balanced_success, admit this many successful contexts per proxy family.
+  --rescue-family-ids IDS
+      For caver_hard_family_rescue, comma-separated proxy families eligible for near-miss rescue.
+  --rescue-per-family-count COUNT
+      For caver_hard_family_rescue, failed near misses to admit per rescued family.
+  --repair-min-trace-records COUNT
+      For caver_family_segment_repair, minimum repaired prefix chunks.
+  --repair-max-trace-records COUNT
+      For caver_family_segment_repair, maximum repaired prefix chunks.
   --dry-run
   -h, --help
 EOF
@@ -47,6 +65,15 @@ log_root="${CAVER_DEFAULT_RDSS_ROOT}/caver/logs/slurm"
 
 source_run_dir=""
 skip_backend_train=0
+admission_policy=""
+admission_kappa=""
+admission_threshold=""
+top_m_success_count=""
+family_min_success_count=""
+rescue_family_ids=""
+rescue_per_family_count=""
+repair_min_trace_records=""
+repair_max_trace_records=""
 dry_run=0
 
 while (($# > 0)); do
@@ -99,6 +126,42 @@ while (($# > 0)); do
       skip_backend_train=1
       shift
       ;;
+    --admission-policy)
+      admission_policy="${2:?missing value for --admission-policy}"
+      shift 2
+      ;;
+    --admission-kappa)
+      admission_kappa="${2:?missing value for --admission-kappa}"
+      shift 2
+      ;;
+    --admission-threshold)
+      admission_threshold="${2:?missing value for --admission-threshold}"
+      shift 2
+      ;;
+    --top-m-success-count)
+      top_m_success_count="${2:?missing value for --top-m-success-count}"
+      shift 2
+      ;;
+    --family-min-success-count)
+      family_min_success_count="${2:?missing value for --family-min-success-count}"
+      shift 2
+      ;;
+    --rescue-family-ids)
+      rescue_family_ids="${2:?missing value for --rescue-family-ids}"
+      shift 2
+      ;;
+    --rescue-per-family-count)
+      rescue_per_family_count="${2:?missing value for --rescue-per-family-count}"
+      shift 2
+      ;;
+    --repair-min-trace-records)
+      repair_min_trace_records="${2:?missing value for --repair-min-trace-records}"
+      shift 2
+      ;;
+    --repair-max-trace-records)
+      repair_max_trace_records="${2:?missing value for --repair-max-trace-records}"
+      shift 2
+      ;;
     --dry-run)
       dry_run=1
       shift
@@ -131,9 +194,7 @@ source_manifest="${source_run_dir}/manifest.json"
 
 for required_path in \
   "${source_job_script}" \
-  "${source_results_dir}/caver_online_eval.json" \
-  "${source_results_dir}/caver_online_contexts.jsonl" \
-  "${source_results_dir}/caver_online_chunks.jsonl"; do
+  "${source_results_dir}"; do
   if [ ! -e "${required_path}" ]; then
     echo "error: required source artifact missing: ${required_path}" >&2
     exit 1
@@ -191,8 +252,24 @@ dependency_directive=""
 if [ -n "${dependency}" ]; then
   dependency_directive="#SBATCH --dependency=${dependency}"
 fi
+gres_directive=""
+if [ "${gpus}" != "0" ]; then
+  gres_directive="#SBATCH --gres=gpu:${gpu_type}:${gpus}"
+fi
 
-job_cmd_str="$(python3 - "${source_job_script}" "${results_dir}" "${skip_backend_train}" <<'PY'
+job_cmd_payload="$(python3 - \
+  "${source_job_script}" \
+  "${results_dir}" \
+  "${skip_backend_train}" \
+  "${admission_policy}" \
+  "${admission_kappa}" \
+  "${admission_threshold}" \
+  "${top_m_success_count}" \
+  "${family_min_success_count}" \
+  "${rescue_family_ids}" \
+  "${rescue_per_family_count}" \
+  "${repair_min_trace_records}" \
+  "${repair_max_trace_records}" <<'PY'
 import pathlib
 import shlex
 import sys
@@ -200,16 +277,52 @@ import sys
 source_job_script = pathlib.Path(sys.argv[1]).resolve()
 results_dir = pathlib.Path(sys.argv[2]).resolve()
 skip_backend_train = bool(int(sys.argv[3]))
+admission_policy = sys.argv[4]
+admission_kappa = sys.argv[5]
+admission_threshold = sys.argv[6]
+top_m_success_count = sys.argv[7]
+family_min_success_count = sys.argv[8]
+rescue_family_ids = sys.argv[9]
+rescue_per_family_count = sys.argv[10]
+repair_min_trace_records = sys.argv[11]
+repair_max_trace_records = sys.argv[12]
 
 command_line = None
+command_kind = None
 with source_job_script.open("r", encoding="utf-8") as handle:
     for raw_line in handle:
-        if "run_stage0_caver_round.sh" in raw_line:
+        if "run_stage0_caver_lagged_budget.py" in raw_line:
             command_line = raw_line.strip()
+            command_kind = "lagged"
+        elif command_line is None and "run_stage0_caver_round.sh" in raw_line:
+            command_line = raw_line.strip()
+            command_kind = "round"
 if not command_line:
-    raise SystemExit(f"could not find run_stage0_caver_round.sh command in {source_job_script}")
+    raise SystemExit(f"could not find Stage-E CAVER runner command in {source_job_script}")
 
 args = shlex.split(command_line)
+
+def remove_option(tokens: list[str], option: str, *, has_value: bool = True) -> list[str]:
+    updated: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if tokens[index] == option:
+            index += 2 if has_value else 1
+            continue
+        updated.append(tokens[index])
+        index += 1
+    return updated
+
+def set_option(tokens: list[str], option: str, value: str) -> list[str]:
+    tokens = remove_option(tokens, option, has_value=True)
+    tokens.extend([option, value])
+    return tokens
+
+def ensure_flag(tokens: list[str], option: str) -> list[str]:
+    if option not in tokens:
+        tokens.append(option)
+    return tokens
+
 for index, value in enumerate(args[:-1]):
     if value == "--results-dir":
         args[index + 1] = str(results_dir)
@@ -217,14 +330,56 @@ for index, value in enumerate(args[:-1]):
 else:
     raise SystemExit("source command does not contain --results-dir")
 
-if "--skip-online" not in args:
-    args.append("--skip-online")
-if skip_backend_train and "--skip-backend-train" not in args:
-    args.append("--skip-backend-train")
+for option in [
+    "--admission-policy",
+    "--admission-kappa",
+    "--admission-threshold",
+    "--top-m-success-count",
+    "--family-min-success-count",
+    "--rescue-family-ids",
+    "--rescue-per-family-count",
+    "--repair-min-trace-records",
+    "--repair-max-trace-records",
+]:
+    args = remove_option(args, option, has_value=True)
 
+if admission_policy:
+    args.extend(["--admission-policy", admission_policy])
+if admission_kappa:
+    args.extend(["--admission-kappa", admission_kappa])
+if admission_threshold:
+    args.extend(["--admission-threshold", admission_threshold])
+if top_m_success_count:
+    args.extend(["--top-m-success-count", top_m_success_count])
+if family_min_success_count:
+    args.extend(["--family-min-success-count", family_min_success_count])
+if rescue_family_ids:
+    args.extend(["--rescue-family-ids", rescue_family_ids])
+if rescue_per_family_count:
+    args.extend(["--rescue-per-family-count", rescue_per_family_count])
+if repair_min_trace_records:
+    args.extend(["--repair-min-trace-records", repair_min_trace_records])
+if repair_max_trace_records:
+    args.extend(["--repair-max-trace-records", repair_max_trace_records])
+
+if command_kind == "lagged":
+    args = ensure_flag(args, "--resume-existing")
+    args = remove_option(args, "--dry-run", has_value=False)
+    args = remove_option(args, "--finalizer-skip-backend-train", has_value=False)
+    args = remove_option(args, "--finalizer-skip-backend-update", has_value=False)
+    if skip_backend_train:
+        args = ensure_flag(args, "--finalizer-skip-backend-train")
+else:
+    args = ensure_flag(args, "--skip-online")
+    if skip_backend_train:
+        args = ensure_flag(args, "--skip-backend-train")
+
+print(command_kind)
 print(shlex.join(args))
 PY
 )"
+command_kind="$(printf '%s\n' "${job_cmd_payload}" | sed -n '1p')"
+job_cmd_str="$(printf '%s\n' "${job_cmd_payload}" | sed -n '2,$p')"
 
 cat >"${job_script}" <<EOF
 #!/usr/bin/env bash
@@ -232,7 +387,7 @@ cat >"${job_script}" <<EOF
 #SBATCH --partition=${partition}
 #SBATCH --qos=${qos}
 #SBATCH --job-name=${job_name}
-#SBATCH --gres=gpu:${gpu_type}:${gpus}
+${gres_directive}
 #SBATCH --cpus-per-task=${cpus}
 #SBATCH --mem=${mem}
 #SBATCH --time=${time_limit}
@@ -248,9 +403,18 @@ export CAVER_RUN_DIR=${run_dir}
 export CAVER_MANIFEST_PATH=${manifest_out}
 
 mkdir -p ${results_dir}
-ln -sfn ${source_results_dir}/caver_online_eval.json ${results_dir}/caver_online_eval.json
-ln -sfn ${source_results_dir}/caver_online_contexts.jsonl ${results_dir}/caver_online_contexts.jsonl
-ln -sfn ${source_results_dir}/caver_online_chunks.jsonl ${results_dir}/caver_online_chunks.jsonl
+if [ "${command_kind}" = "lagged" ]; then
+  ln -sfn ${source_results_dir}/lagged_rounds ${results_dir}/lagged_rounds
+else
+  ln -sfn ${source_results_dir}/caver_online_eval.json ${results_dir}/caver_online_eval.json
+  ln -sfn ${source_results_dir}/caver_online_contexts.jsonl ${results_dir}/caver_online_contexts.jsonl
+  ln -sfn ${source_results_dir}/caver_online_chunks.jsonl ${results_dir}/caver_online_chunks.jsonl
+  if [ -f ${source_results_dir}/caver_online_demo_chunks.jsonl.gz ]; then
+    ln -sfn ${source_results_dir}/caver_online_demo_chunks.jsonl.gz ${results_dir}/caver_online_demo_chunks.jsonl.gz
+  elif [ -f ${source_results_dir}/caver_online_demo_chunks.jsonl ]; then
+    ln -sfn ${source_results_dir}/caver_online_demo_chunks.jsonl ${results_dir}/caver_online_demo_chunks.jsonl.gz
+  fi
+fi
 
 ${job_cmd_str}
 EOF
@@ -274,3 +438,7 @@ fi
 
 submission_output="$(sbatch "${job_script}")"
 echo "${submission_output}"
+echo "run_dir: ${run_dir}"
+echo "results_dir: ${results_dir}"
+echo "stdout: ${slurm_stdout}"
+echo "stderr: ${slurm_stderr}"

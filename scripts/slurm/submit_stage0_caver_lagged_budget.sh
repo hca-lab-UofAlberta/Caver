@@ -62,12 +62,25 @@ Online execution options:
 CAVER scaffold options:
   --selector-mode NAME
   --admission-policy NAME
+  --admission-kappa VALUE
+  --admission-threshold VALUE
+  --top-m-success-count COUNT
+  --family-min-success-count COUNT
   --value-proxy-model-path PATH
   --dr-calibrator-model-path PATH
+  --rescue-family-ids IDS
+  --rescue-per-family-count COUNT
+  --repair-min-trace-records COUNT
+  --repair-max-trace-records COUNT
+  --repair-min-progress VALUE
+  --repair-min-primitive-steps COUNT
+  --repair-max-regression VALUE
   --provider-mode NAME
   --provider-bundle-root PATH
   --provider-gesim-timeout-sec COUNT
   --provider-gesim-prompt TEXT
+  --demo-trace-write-policy NAME
+  --trace-stage0-progress
   --no-require-candidate-bank
 
 Backend update options:
@@ -76,6 +89,13 @@ Backend update options:
   --backend-task-suite NAME
   --backend-task-ids IDS
   --experiment-name NAME
+  --run-label-suffix TOKEN
+  --finalizer-skip-backend-update
+  --disable-lagged-dr
+  --skip-dr-calibrator-fit
+  --disable-lagged-lvd
+  --skip-lvd-selector-fit
+  --lvd-target-source NAME
   --train-envs COUNT
   --eval-envs COUNT
   --runner-max-steps COUNT
@@ -143,12 +163,26 @@ exact_infer_mode="train"
 
 selector_mode="frozen_actionspace_softmax_v1"
 admission_policy="success_lcb_v1"
+admission_kappa=""
+admission_threshold=""
+top_m_success_count=""
+family_min_success_count=""
 value_proxy_model_path=""
 dr_calibrator_model_path=""
+lvd_selector_model_path=""
+rescue_family_ids=""
+rescue_per_family_count=""
+repair_min_trace_records=""
+repair_max_trace_records=""
+repair_min_progress=""
+repair_min_primitive_steps=""
+repair_max_regression=""
 provider_mode="none"
 provider_bundle_root=""
 provider_gesim_timeout_sec="900"
 provider_gesim_prompt="best quality, consistent and smooth motion, realistic, clear and distinct."
+demo_trace_write_policy="success_only"
+trace_stage0_progress=0
 require_candidate_bank=1
 
 config_name="libero_goal_ppo_openpi_pi05"
@@ -156,6 +190,13 @@ model_path="/projects/p57098/euijin1/Caver/third_party/openpi-cache/openpi-asset
 backend_task_suite=""
 backend_task_ids=""
 experiment_name="stage0_caver_lagged_budget"
+run_label_suffix=""
+finalizer_skip_backend_update=0
+disable_lagged_dr=0
+skip_dr_calibrator_fit=0
+disable_lagged_lvd=0
+skip_lvd_selector_fit=0
+lvd_target_source="dr_clipped"
 train_envs="1"
 eval_envs="1"
 train_envs_explicit=0
@@ -356,12 +397,60 @@ while (($# > 0)); do
       admission_policy="${2:?missing value for --admission-policy}"
       shift 2
       ;;
+    --admission-kappa)
+      admission_kappa="${2:?missing value for --admission-kappa}"
+      shift 2
+      ;;
+    --admission-threshold)
+      admission_threshold="${2:?missing value for --admission-threshold}"
+      shift 2
+      ;;
+    --top-m-success-count)
+      top_m_success_count="${2:?missing value for --top-m-success-count}"
+      shift 2
+      ;;
+    --family-min-success-count)
+      family_min_success_count="${2:?missing value for --family-min-success-count}"
+      shift 2
+      ;;
     --value-proxy-model-path)
       value_proxy_model_path="${2:?missing value for --value-proxy-model-path}"
       shift 2
       ;;
     --dr-calibrator-model-path)
       dr_calibrator_model_path="${2:?missing value for --dr-calibrator-model-path}"
+      shift 2
+      ;;
+    --lvd-selector-model-path)
+      lvd_selector_model_path="${2:?missing value for --lvd-selector-model-path}"
+      shift 2
+      ;;
+    --rescue-family-ids)
+      rescue_family_ids="${2:?missing value for --rescue-family-ids}"
+      shift 2
+      ;;
+    --rescue-per-family-count)
+      rescue_per_family_count="${2:?missing value for --rescue-per-family-count}"
+      shift 2
+      ;;
+    --repair-min-trace-records)
+      repair_min_trace_records="${2:?missing value for --repair-min-trace-records}"
+      shift 2
+      ;;
+    --repair-max-trace-records)
+      repair_max_trace_records="${2:?missing value for --repair-max-trace-records}"
+      shift 2
+      ;;
+    --repair-min-progress)
+      repair_min_progress="${2:?missing value for --repair-min-progress}"
+      shift 2
+      ;;
+    --repair-min-primitive-steps)
+      repair_min_primitive_steps="${2:?missing value for --repair-min-primitive-steps}"
+      shift 2
+      ;;
+    --repair-max-regression)
+      repair_max_regression="${2:?missing value for --repair-max-regression}"
       shift 2
       ;;
     --provider-mode)
@@ -379,6 +468,14 @@ while (($# > 0)); do
     --provider-gesim-prompt)
       provider_gesim_prompt="${2:?missing value for --provider-gesim-prompt}"
       shift 2
+      ;;
+    --demo-trace-write-policy)
+      demo_trace_write_policy="${2:?missing value for --demo-trace-write-policy}"
+      shift 2
+      ;;
+    --trace-stage0-progress)
+      trace_stage0_progress=1
+      shift
       ;;
     --no-require-candidate-bank)
       require_candidate_bank=0
@@ -402,6 +499,34 @@ while (($# > 0)); do
       ;;
     --experiment-name)
       experiment_name="${2:?missing value for --experiment-name}"
+      shift 2
+      ;;
+    --run-label-suffix)
+      run_label_suffix="${2:?missing value for --run-label-suffix}"
+      shift 2
+      ;;
+    --finalizer-skip-backend-update)
+      finalizer_skip_backend_update=1
+      shift
+      ;;
+    --disable-lagged-dr)
+      disable_lagged_dr=1
+      shift
+      ;;
+    --skip-dr-calibrator-fit)
+      skip_dr_calibrator_fit=1
+      shift
+      ;;
+    --disable-lagged-lvd)
+      disable_lagged_lvd=1
+      shift
+      ;;
+    --skip-lvd-selector-fit)
+      skip_lvd_selector_fit=1
+      shift
+      ;;
+    --lvd-target-source)
+      lvd_target_source="${2:?missing value for --lvd-target-source}"
       shift 2
       ;;
     --train-envs)
@@ -493,12 +618,25 @@ case "${trace_reference_mode}" in
     ;;
 esac
 
+case "${demo_trace_write_policy}" in
+  all|success_only)
+    ;;
+  *)
+    echo "error: unsupported --demo-trace-write-policy ${demo_trace_write_policy}" >&2
+    exit 1
+    ;;
+esac
+
 if [ -n "${manifest_path}" ]; then
   task_token="$(printf "%s" "manifest-${partition_name:-unset}-${family_ids:-all}" | sed -E 's/[^A-Za-z0-9._-]+/-/g')"
   budget_token="${max_contexts:-${round_size}}"
 else
   task_token="$(printf "%s" "${task_suite}-task-${task_ids}" | sed -E 's/[^A-Za-z0-9._-]+/-/g')"
   budget_token="${num_trials_per_task}"
+fi
+if [ -n "${run_label_suffix}" ]; then
+  run_label_suffix="$(printf "%s" "${run_label_suffix}" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+  task_token="${task_token}-${run_label_suffix}"
 fi
 
 stamp="$(timestamp_utc)"
@@ -603,6 +741,42 @@ fi
 if [ -n "${dr_calibrator_model_path}" ]; then
   job_cmd+=(--dr-calibrator-model-path "${dr_calibrator_model_path}")
 fi
+if [ -n "${lvd_selector_model_path}" ]; then
+  job_cmd+=(--lvd-selector-model-path "${lvd_selector_model_path}")
+fi
+if [ -n "${admission_kappa}" ]; then
+  job_cmd+=(--admission-kappa "${admission_kappa}")
+fi
+if [ -n "${admission_threshold}" ]; then
+  job_cmd+=(--admission-threshold "${admission_threshold}")
+fi
+if [ -n "${top_m_success_count}" ]; then
+  job_cmd+=(--top-m-success-count "${top_m_success_count}")
+fi
+if [ -n "${family_min_success_count}" ]; then
+  job_cmd+=(--family-min-success-count "${family_min_success_count}")
+fi
+if [ -n "${rescue_family_ids}" ]; then
+  job_cmd+=(--rescue-family-ids "${rescue_family_ids}")
+fi
+if [ -n "${rescue_per_family_count}" ]; then
+  job_cmd+=(--rescue-per-family-count "${rescue_per_family_count}")
+fi
+if [ -n "${repair_min_trace_records}" ]; then
+  job_cmd+=(--repair-min-trace-records "${repair_min_trace_records}")
+fi
+if [ -n "${repair_max_trace_records}" ]; then
+  job_cmd+=(--repair-max-trace-records "${repair_max_trace_records}")
+fi
+if [ -n "${repair_min_progress}" ]; then
+  job_cmd+=(--repair-min-progress "${repair_min_progress}")
+fi
+if [ -n "${repair_min_primitive_steps}" ]; then
+  job_cmd+=(--repair-min-primitive-steps "${repair_min_primitive_steps}")
+fi
+if [ -n "${repair_max_regression}" ]; then
+  job_cmd+=(--repair-max-regression "${repair_max_regression}")
+fi
 if [ -n "${provider_mode}" ]; then
   job_cmd+=(--provider-mode "${provider_mode}")
 fi
@@ -614,6 +788,12 @@ if [ -n "${provider_gesim_timeout_sec}" ]; then
 fi
 if [ -n "${provider_gesim_prompt}" ]; then
   job_cmd+=(--provider-gesim-prompt "${provider_gesim_prompt}")
+fi
+if [ -n "${demo_trace_write_policy}" ]; then
+  job_cmd+=(--demo-trace-write-policy "${demo_trace_write_policy}")
+fi
+if ((trace_stage0_progress)); then
+  job_cmd+=(--trace-stage0-progress)
 fi
 if [ -n "${max_env_steps}" ]; then
   job_cmd+=(--max-env-steps "${max_env_steps}")
@@ -654,6 +834,24 @@ fi
 if (( ! require_candidate_bank )); then
   job_cmd+=(--no-require-candidate-bank)
 fi
+if (( finalizer_skip_backend_update )); then
+  job_cmd+=(--finalizer-skip-backend-update)
+fi
+if (( disable_lagged_dr )); then
+  job_cmd+=(--disable-lagged-dr)
+fi
+if (( skip_dr_calibrator_fit )); then
+  job_cmd+=(--skip-dr-calibrator-fit)
+fi
+if (( disable_lagged_lvd )); then
+  job_cmd+=(--disable-lagged-lvd)
+fi
+if (( skip_lvd_selector_fit )); then
+  job_cmd+=(--skip-lvd-selector-fit)
+fi
+if [ -n "${lvd_target_source}" ]; then
+  job_cmd+=(--lvd-target-source "${lvd_target_source}")
+fi
 
 cat >"${job_script}" <<EOF
 #!/usr/bin/env bash
@@ -675,6 +873,9 @@ cd ${CAVER_REPO_ROOT}
 export CAVER_RUN_ID=${run_id}
 export CAVER_RUN_DIR=${run_dir}
 export CAVER_MANIFEST_PATH=${manifest_out}
+export TMPDIR="\${CAVER_NODE_LOCAL_TMP_ROOT:-/tmp/\${USER}/caver_stagee_lagged}/\${SLURM_JOB_ID:-manual}"
+export CAVER_STAGEE_HEAVY_TRACE_ROOT="\${TMPDIR}/heavy_traces"
+mkdir -p "\${CAVER_STAGEE_HEAVY_TRACE_ROOT}" "\${TMPDIR}"
 
 $(printf '%q ' "${job_cmd[@]}")
 EOF

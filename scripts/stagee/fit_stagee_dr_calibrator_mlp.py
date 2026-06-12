@@ -31,9 +31,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-path", required=True, help="Output JSON path for the training summary.")
     parser.add_argument(
         "--target-key",
-        default="dr_pseudo_outcome_clipped",
+        default="dr_pseudo_outcome",
         choices=("dr_pseudo_outcome", "dr_pseudo_outcome_clipped"),
-        help="Dataset target used for calibrator fitting (default: dr_pseudo_outcome_clipped).",
+        help="Dataset target used for calibrator fitting (default: raw dr_pseudo_outcome).",
     )
     parser.add_argument("--model-id", default=None, help="Optional explicit model id written into the artifact.")
     parser.add_argument("--epochs", type=int, default=50, help="Maximum training epochs (default: 50).")
@@ -349,6 +349,8 @@ def main() -> int:
         "model_format": STAGEE_DR_CALIBRATOR_MODEL_FORMAT,
         "model_id": str(args.model_id or STAGEE_DR_CALIBRATOR_MODEL_ID),
         "dataset_path": str(dataset_path),
+        "target_key": args.target_key,
+        "mean_output": "raw_unclipped",
         "feature_spec": {
             "family_ids": family_ids,
             "policy_query_index_scale": policy_query_index_scale,
